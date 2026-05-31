@@ -31,8 +31,25 @@ app.set('socketio', io);
 
 // Middleware
 app.use(express.json());
+
+const allowedOrigins = [
+    'https://eth-qms-ui-b2md.vercel.app',
+    'http://localhost',
+    'https://localhost',
+    'http://localhost:5173',
+    'http://localhost:5000'
+];
+
 app.use(cors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        const isAllowed = allowedOrigins.includes(origin) || origin.startsWith('http://localhost') || origin.startsWith('https://localhost');
+        if (isAllowed) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true
 }));
