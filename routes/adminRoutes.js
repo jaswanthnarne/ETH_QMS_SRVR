@@ -55,7 +55,7 @@ router.post('/exams/:id/unpublish', authorize('super_admin', 'college_admin', 't
 router.post('/exams/:id/clone', authorize('super_admin', 'college_admin', 'trainer'), cloneExam);
 router.post('/exams/parse-document', authorize('super_admin', 'college_admin', 'trainer'), upload.single('document'), parseDocument);
 router.post('/exams/bulk-import', authorize('super_admin', 'college_admin', 'trainer'), upload.single('file'), bulkImportQuestions);
-router.get('/allotments', authorize('super_admin', 'college_admin'), getAllotments);
+router.get('/allotments', authorize('super_admin', 'college_admin', 'trainer'), getAllotments);
 router.delete('/exams/:id', authorize('super_admin', 'college_admin', 'trainer'), deleteExam);
 
 // Template download (no auth required — it's just a static file pointer)

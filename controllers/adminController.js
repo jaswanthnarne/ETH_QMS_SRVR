@@ -806,7 +806,9 @@ exports.getAllotments = async (req, res) => {
         let collegeId = req.query.collegeId || (req.user.role === 'college_admin' ? req.user.collegeId : null);
         let filter = {};
 
-        if (collegeId) {
+        if (req.user.role === 'trainer') {
+            filter.trainerId = req.user._id;
+        } else if (collegeId) {
             // Find all exams for this college
             const exams = await Exam.find({ collegeId }).select('_id');
             const examIds = exams.map(e => e._id);
