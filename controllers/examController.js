@@ -166,7 +166,16 @@ exports.getExamSettingsByKey = async (req, res) => {
         const exam = await Exam.findById(trainerKey.examId).select('settings title');
         if (!exam) return res.status(404).json({ success: false, error: 'Exam not found' });
 
-        res.json({ success: true, data: { settings: exam.settings || {}, title: exam.title, isActive: trainerKey.isActive } });
+        res.json({ 
+            success: true, 
+            data: { 
+                settings: exam.settings || {}, 
+                title: exam.title, 
+                isActive: trainerKey.isActive,
+                isStarted: trainerKey.isStarted,
+                isPaused: trainerKey.isPaused
+            } 
+        });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
@@ -346,6 +355,35 @@ exports.updateProgress = async (req, res) => {
                 }
             );
         }
+
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.updateViolations = async (req, res) => {
+    try {
+        const { examId, rollNumber, violations } = req.body;
+
+        await StudentAttempt.findOneAndUpdate(
+            {
+                examId,
+                'studentDetails.rollNumber': rollNumber,
+                status: { $ne: 'completed' }
+            },
+            {
+                $set: {
+                    'violations.tabSwitches': violations.tabSwitches || 0,
+                    'violations.fullScreenExits': violations.fullScreenExits || 0,
+                    'violations.copyAttempts': violations.copyAttempts || 0,
+                    'violations.devToolsAttempts': violations.devToolsAttempts || 0,
+                    'violations.windowBlurs': violations.windowBlurs || 0,
+                    'violations.overlaysDetected': violations.overlaysDetected || 0,
+                    'violations.idleTimeouts': violations.idleTimeouts || 0
+                }
+            }
+        );
 
         res.json({ success: true });
     } catch (error) {

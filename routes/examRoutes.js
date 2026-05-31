@@ -7,7 +7,8 @@ const {
     startAttempt, 
     updateProgress,
     getExamSettingsByKey,
-    resumeSession
+    resumeSession,
+    updateViolations
 } = require('../controllers/examController');
 const { generateCertificate } = require('../utils/certificateGenerator');
 const StudentAttempt = require('../models/StudentAttempt');
@@ -21,6 +22,7 @@ router.post('/submit', submitExamAttempt);
 router.post('/validate-key', validateExamKey);
 router.post('/start-attempt', startAttempt);
 router.post('/update-progress', updateProgress);
+router.post('/update-violations', updateViolations);
 router.get('/resume/:sessionId', resumeSession);
 
 // Student-accessible certificate download (no auth, uses rollNumber + attemptId as verification)
