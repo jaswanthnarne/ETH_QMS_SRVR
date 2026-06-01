@@ -173,11 +173,11 @@ exports.deleteCourse = async (req, res) => {
             return res.json({ success: true, message: 'Course unassigned from trainer successfully' });
         }
 
-        // Also delete exams associated with this course
-        await Exam.deleteMany({ courseId: req.params.id });
+        // Unset courseId from exams associated with this course so they are NOT deleted
+        await Exam.updateMany({ courseId: req.params.id }, { $unset: { courseId: "" } });
         await course.deleteOne();
         emitDataUpdated(req, 'courses', 'delete', { id: req.params.id });
-        res.json({ success: true, message: 'Course and its exams deleted' });
+        res.json({ success: true, message: 'Course deleted successfully (associated exams were preserved)' });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
@@ -760,8 +760,8 @@ exports.publishExam = async (req, res) => {
                 const examShort = exam.title.replace(/[^A-Za-z0-9]/g, '').substring(0, 2).toUpperCase() || 'EX';
                 
                 const uniqueKey = batchCode 
-                    ? `${course.code}-${examShort}-${batchCode}-${randomCode}`
-                    : `${course.code}-${examShort}-${randomCode}`;
+                    ? `${course?.code || 'CRS'}-${examShort}-${batchCode}-${randomCode}`
+                    : `${course?.code || 'CRS'}-${examShort}-${randomCode}`;
                 
                 await TrainerExamKey.create({
                     examId: exam._id,

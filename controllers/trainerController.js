@@ -318,8 +318,8 @@ exports.publishTrainerExam = async (req, res) => {
                 const randomCode = crypto.randomBytes(2).toString('hex').toUpperCase();
                 const examShort = exam.title.replace(/[^A-Za-z0-9]/g, '').substring(0, 2).toUpperCase() || 'EX';
                 const uniqueKey = batchCode 
-                    ? `${exam.courseId.code || 'CRS'}-${examShort}-${batchCode}-${randomCode}`
-                    : `${exam.courseId.code || 'CRS'}-${examShort}-${randomCode}`;
+                    ? `${exam.courseId?.code || 'CRS'}-${examShort}-${batchCode}-${randomCode}`
+                    : `${exam.courseId?.code || 'CRS'}-${examShort}-${randomCode}`;
 
                 existingKey = await TrainerExamKey.create({
                     examId: exam._id,
