@@ -289,30 +289,28 @@ exports.exportMasterSheet = async (req, res) => {
                 styleDataRow(row, i % 2 === 0);
             });
 
-            // Group logs by trainerId
-            const trainerLogsMap = {};
+            // Group logs by courseId
+            const courseLogsMap = {};
             logs.forEach(log => {
-                const trainerKey = log.trainerId?._id?.toString() || 'unknown';
-                if (!trainerLogsMap[trainerKey]) {
-                    const trainerName = log.trainerId
-                        ? (`${log.trainerId.firstName || ''} ${log.trainerId.lastName || ''}`.trim() || log.trainerId.phone || log.trainerId.username || 'System')
-                        : 'System';
-                    const trainerPhone = log.trainerId?.phone || '—';
-                    trainerLogsMap[trainerKey] = {
-                        name: trainerName,
-                        phone: trainerPhone,
+                const courseKey = log.courseId?._id?.toString() || 'unknown';
+                if (!courseLogsMap[courseKey]) {
+                    const courseName = log.courseId?.name || 'Unknown Course';
+                    const courseCode = log.courseId?.code || '—';
+                    courseLogsMap[courseKey] = {
+                        name: courseName,
+                        code: courseCode,
                         entries: []
                     };
                 }
-                trainerLogsMap[trainerKey].entries.push(log);
+                courseLogsMap[courseKey].entries.push(log);
             });
 
             const usedSheetNames = new Set();
             const logColumns = [
                 { header: 'Log Date', key: 'logDate', width: 14 },
                 { header: 'College Name', key: 'collegeName', width: 28 },
-                { header: 'Course Name', key: 'courseName', width: 28 },
-                { header: 'Course Code', key: 'courseCode', width: 12 },
+                { header: 'Trainer Name', key: 'trainerName', width: 22 },
+                { header: 'Trainer Phone', key: 'trainerPhone', width: 15 },
                 { header: 'Trainer Start Date', key: 'trainerStartDate', width: 18 },
                 { header: 'Batch Name', key: 'batchName', width: 14 },
                 { header: 'Time Slot', key: 'timeSlot', width: 22 },
@@ -324,11 +322,11 @@ exports.exportMasterSheet = async (req, res) => {
                 { header: 'Topics Covered', key: 'topics', width: 35 }
             ];
 
-            // Create a separate sheet for each trainer
-            for (const [trainerId, trainerGroup] of Object.entries(trainerLogsMap)) {
+            // Create a separate sheet for each course
+            for (const [courseId, courseGroup] of Object.entries(courseLogsMap)) {
                 // Generate a valid, unique sheet name (limited to 31 characters)
-                let baseName = trainerGroup.name.replace(/[\\/*?:\[\]]/g, '').trim().substring(0, 31);
-                if (!baseName) baseName = 'Trainer';
+                let baseName = `${courseGroup.code} ${courseGroup.name}`.replace(/[\\/*?:\[\]]/g, '').trim().substring(0, 31);
+                if (!baseName) baseName = 'Course';
                 let sheetName = baseName;
                 let counter = 1;
                 while (usedSheetNames.has(sheetName)) {
@@ -342,10 +340,12 @@ exports.exportMasterSheet = async (req, res) => {
                 styleHeader(logsSheet);
 
                 let rowIndex = 0;
-                trainerGroup.entries.forEach((log) => {
+                courseGroup.entries.forEach((log) => {
                     const currentCollegeName = log.collegeId?.name || '—';
-                    const currentCourseName = log.courseId?.name || '—';
-                    const courseCode = log.courseId?.code || '—';
+                    const trainerName = log.trainerId
+                        ? (`${log.trainerId.firstName || ''} ${log.trainerId.lastName || ''}`.trim() || log.trainerId.phone || log.trainerId.username || 'System')
+                        : 'System';
+                    const trainerPhone = log.trainerId?.phone || '—';
                     const startDateStr = log.startDate ? new Date(log.startDate).toLocaleDateString('en-IN') : '—';
                     const logDateStr = log.logDate ? new Date(log.logDate).toLocaleDateString('en-IN') : '—';
 
@@ -355,8 +355,8 @@ exports.exportMasterSheet = async (req, res) => {
                             const row = logsSheet.addRow({
                                 logDate: logDateStr,
                                 collegeName: currentCollegeName,
-                                courseName: currentCourseName,
-                                courseCode,
+                                trainerName: trainerName,
+                                trainerPhone: trainerPhone,
                                 trainerStartDate: startDateStr,
                                 batchName: b.batchName || '—',
                                 timeSlot: b.timeSlot || '—',
@@ -421,7 +421,12 @@ exports.exportMasterSheet = async (req, res) => {
             collegeId = course?.collegeId;
             exams = await Exam.find({ courseId: id }).populate('courseId', 'name code');
             const examIds = exams.map(e => e._id);
-            attempts = await StudentAttempt.find({ examId: { $in: examIds } })
+            
+            let attemptsFilter = { examId: { $in: examIds } };
+            if (req.user.role === 'trainer') {
+                attemptsFilter.trainerId = req.user._id;
+            }
+            attempts = await StudentAttempt.find(attemptsFilter)
                 .populate({ path: 'examId', select: 'title department courseId', populate: { path: 'courseId', select: 'name code' } })
                 .populate('trainerId', 'username firstName lastName phone')
                 .populate({ path: 'sessionId', populate: { path: 'batchId', select: 'batchName' } });
