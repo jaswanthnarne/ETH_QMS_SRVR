@@ -36,6 +36,7 @@ app.use(express.json());
 
 const allowedOrigins = [
     'https://eth-qms-ui-b2md.vercel.app',
+    'https://ethops.jaswanthnarne.online',
     'http://localhost',
     'https://localhost',
     'http://localhost:5173',
@@ -45,7 +46,11 @@ const allowedOrigins = [
 app.use(cors({
     origin: (origin, callback) => {
         if (!origin) return callback(null, true);
-        const isAllowed = allowedOrigins.includes(origin) || origin.startsWith('http://localhost') || origin.startsWith('https://localhost');
+        const isAllowed = allowedOrigins.includes(origin) || 
+                          origin.startsWith('http://localhost') || 
+                          origin.startsWith('https://localhost') ||
+                          origin.endsWith('jaswanthnarne.online') ||
+                          origin.endsWith('vercel.app');
         if (isAllowed) {
             callback(null, true);
         } else {
