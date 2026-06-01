@@ -170,7 +170,6 @@ exports.deleteCourse = async (req, res) => {
             await User.findByIdAndUpdate(req.user._id, {
                 $pull: { assignedCourses: req.params.id }
             });
-            emitDataUpdated(req, 'courses', 'delete', { id: req.params.id });
             return res.json({ success: true, message: 'Course unassigned from trainer successfully' });
         }
 
