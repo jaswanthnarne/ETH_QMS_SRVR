@@ -1,14 +1,26 @@
 const Notification = require('../models/Notification');
 
-// @desc    Get notifications for the logged-in user (Super Admin gets all, College Admin gets college-specific)
+// @desc    Get notifications for the logged-in user
 // @route   GET /api/notifications
-// @access  Private (Admins only)
+// @access  Private
 exports.getNotifications = async (req, res) => {
     try {
         const user = req.user;
         let filter = {};
         if (user.role === 'college_admin') {
             filter.collegeId = user.collegeId;
+        } else if (user.role === 'trainer') {
+            const collegeIds = [
+                user.collegeId,
+                ...(Array.isArray(user.assignedColleges) ? user.assignedColleges : [])
+            ].filter(Boolean);
+
+            filter.$or = [
+                { targetRoles: user.role },
+                { targetUsers: user._id },
+                ...(collegeIds.length ? [{ collegeId: { $in: collegeIds } }] : []),
+                { collegeId: null, targetRoles: { $in: ['trainer'] } }
+            ];
         }
 
         const notifications = await Notification.find(filter)
@@ -41,7 +53,7 @@ exports.getNotifications = async (req, res) => {
 
 // @desc    Mark a notification as read for the logged-in user
 // @route   PUT /api/notifications/:id/read
-// @access  Private (Admins only)
+// @access  Private
 exports.markAsRead = async (req, res) => {
     try {
         const notification = await Notification.findById(req.params.id);
@@ -63,13 +75,25 @@ exports.markAsRead = async (req, res) => {
 
 // @desc    Mark all notifications as read for the logged-in user
 // @route   DELETE /api/notifications/clear
-// @access  Private (Admins only)
+// @access  Private
 exports.clearAll = async (req, res) => {
     try {
         const user = req.user;
         let filter = {};
         if (user.role === 'college_admin') {
             filter.collegeId = user.collegeId;
+        } else if (user.role === 'trainer') {
+            const collegeIds = [
+                user.collegeId,
+                ...(Array.isArray(user.assignedColleges) ? user.assignedColleges : [])
+            ].filter(Boolean);
+
+            filter.$or = [
+                { targetRoles: user.role },
+                { targetUsers: user._id },
+                ...(collegeIds.length ? [{ collegeId: { $in: collegeIds } }] : []),
+                { collegeId: null, targetRoles: { $in: ['trainer'] } }
+            ];
         }
 
         // Add user._id to readBy list for all match notifications that do not have it

@@ -18,6 +18,15 @@ const notificationSchema = new mongoose.Schema({
         ref: 'College',
         default: null
     },
+    targetRoles: [{
+        type: String,
+        enum: ['super_admin', 'college_admin', 'trainer'],
+        default: undefined
+    }],
+    targetUsers: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }],
     readBy: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'

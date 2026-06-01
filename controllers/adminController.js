@@ -778,6 +778,27 @@ exports.publishExam = async (req, res) => {
             }
         }
 
+        const Notification = require('../models/Notification');
+        const notif = await Notification.create({
+            title: 'Assessment Published',
+            message: `"${exam.title}" is now published. ${keys.length} access key${keys.length === 1 ? '' : 's'} generated for assigned trainers.`,
+            type: 'exam_published',
+            collegeId: exam.collegeId,
+            targetRoles: ['trainer', 'super_admin', 'college_admin'],
+            targetUsers: trainers.map(t => t._id)
+        });
+
+        const io = req.app.get('socketio');
+        if (io) {
+            io.emit('new_notification', { ...notif.toObject(), isRead: false });
+            io.emit('data_updated', {
+                resource: 'exams',
+                action: 'publish',
+                data: { id: exam._id, title: exam.title, status: exam.status },
+                timestamp: new Date()
+            });
+        }
+
         res.json({ success: true, message: 'Exam published and keys generated', keys });
     } catch (error) {
         res.status(400).json({ success: false, error: error.message });
@@ -1039,4 +1060,3 @@ exports.getAdminTrainingLogs = async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 };
-

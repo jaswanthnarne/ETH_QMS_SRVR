@@ -3,9 +3,9 @@ const router = express.Router();
 const { protect, authorize } = require('../middleware/authMiddleware');
 const { getNotifications, markAsRead, clearAll } = require('../controllers/notificationController');
 
-// All notification routes are protected and restricted to admins
+// Notifications are used by admins and trainers.
 router.use(protect);
-router.use(authorize('super_admin', 'college_admin'));
+router.use(authorize('super_admin', 'college_admin', 'trainer'));
 
 router.get('/', getNotifications);
 router.put('/:id/read', markAsRead);

@@ -11,10 +11,6 @@ exports.getAssignedExams = async (req, res) => {
     try {
         const trainerId = req.user._id;
 
-        // Get the trainer's assignedCourses
-        const trainer = await User.findById(trainerId).select('assignedCourses collegeId assignedColleges');
-        const assignedCourseIds = trainer?.assignedCourses || [];
-
         // Get all keys for this trainer
         const assignedKeys = await TrainerExamKey.find({ trainerId })
             .populate({
@@ -26,12 +22,11 @@ exports.getAssignedExams = async (req, res) => {
             })
             .populate('batchId', 'batchName');
 
-        // Filter: only published exams; if trainer has assignedCourses, further filter by them
+        // The key is the assignment. Only hide unpublished/deleted exams.
         const formattedExams = assignedKeys
             .filter(ak => {
                 if (!ak.examId || ak.examId.status !== 'published') return false;
-                if (assignedCourseIds.length === 0) return true; // No course restriction
-                return assignedCourseIds.some(cid => cid.toString() === ak.examId.courseId?._id?.toString());
+                return true;
             })
             .map(ak => ({
                 id: ak._id,
@@ -345,8 +340,20 @@ exports.publishTrainerExam = async (req, res) => {
             await exam.save();
         }
 
+        const Notification = require('../models/Notification');
+        const trainerName = `${trainer.firstName || ''} ${trainer.lastName || ''}`.trim() || trainer.phone || trainer.username || 'Trainer';
+        const notif = await Notification.create({
+            title: 'Trainer Published Assessment',
+            message: `${trainerName} published "${exam.title}" and generated an access key.`,
+            type: 'exam_published',
+            collegeId: exam.collegeId,
+            targetRoles: ['super_admin', 'college_admin', 'trainer'],
+            targetUsers: [trainer._id]
+        });
+
         const io = req.app.get('socketio');
         if (io) {
+            io.emit('new_notification', { ...notif.toObject(), isRead: false });
             io.emit('data_updated', {
                 resource: 'exams',
                 action: 'publish',

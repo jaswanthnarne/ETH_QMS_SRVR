@@ -5,6 +5,7 @@ const Course = require('../models/Course');
 const College = require('../models/College');
 const ExcelJS = require('exceljs');
 const TrainingLog = require('../models/TrainingLog');
+const TrainerExamKey = require('../models/TrainerExamKey');
 
 // ========== Helper: style header row ==========
 function styleHeader(sheet, color = 'FF004AAD') {
