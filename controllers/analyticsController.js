@@ -231,6 +231,19 @@ exports.exportMasterSheet = async (req, res) => {
                 }
             }
 
+            // Optional College and Course Filters (for both admins and trainers)
+            const { collegeId, courseId } = req.query;
+            if (collegeId && collegeId !== 'all') {
+                filter.collegeId = collegeId;
+                const coll = await College.findById(collegeId);
+                if (coll) {
+                    collegeName = coll.name;
+                }
+            }
+            if (courseId && courseId !== 'all') {
+                filter.courseId = courseId;
+            }
+
             const logs = await TrainingLog.find(filter)
                 .populate('trainerId', 'username firstName lastName phone')
                 .populate('collegeId', 'name')
@@ -307,19 +320,19 @@ exports.exportMasterSheet = async (req, res) => {
 
             const usedSheetNames = new Set();
             const logColumns = [
-                { header: 'Log Date', key: 'logDate', width: 14 },
-                { header: 'College Name', key: 'collegeName', width: 28 },
                 { header: 'Trainer Name', key: 'trainerName', width: 22 },
+                { header: 'Log Date', key: 'logDate', width: 14 },
+                { header: 'Topic Covered', key: 'topics', width: 35 },
+                { header: 'Head Count', key: 'present', width: 12 },
+                { header: 'Actual Count', key: 'total', width: 12 },
+                { header: 'Attendance %', key: 'attendanceRate', width: 14 },
+                { header: 'College Name', key: 'collegeName', width: 28 },
                 { header: 'Trainer Phone', key: 'trainerPhone', width: 15 },
                 { header: 'Trainer Start Date', key: 'trainerStartDate', width: 18 },
                 { header: 'Batch Name', key: 'batchName', width: 14 },
                 { header: 'Time Slot', key: 'timeSlot', width: 22 },
                 { header: 'Department', key: 'dept', width: 16 },
-                { header: 'Module', key: 'module', width: 18 },
-                { header: 'Present', key: 'present', width: 10 },
-                { header: 'Total', key: 'total', width: 10 },
-                { header: 'Attendance %', key: 'attendanceRate', width: 14 },
-                { header: 'Topics Covered', key: 'topics', width: 35 }
+                { header: 'Module', key: 'module', width: 18 }
             ];
 
             // Create a separate sheet for each course
