@@ -387,10 +387,10 @@ exports.exportMasterSheet = async (req, res) => {
 
             // Set headers and response
             const reportTitle = `${collegeName.replace(/\s+/g, '_')}_Training_Logs_Report`;
+            const buffer = await workbook.xlsx.writeBuffer();
             res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
             res.setHeader('Content-Disposition', `attachment; filename="${reportTitle}.xlsx"`);
-            await workbook.xlsx.write(res);
-            res.end();
+            res.send(buffer);
             return;
         }
 
@@ -792,10 +792,10 @@ exports.exportMasterSheet = async (req, res) => {
         });
 
         // Send response
+        const buffer = await workbook.xlsx.writeBuffer();
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${reportTitle}.xlsx"`);
-        await workbook.xlsx.write(res);
-        res.end();
+        res.send(buffer);
 
     } catch (error) {
         console.error('Export Error:', error);
