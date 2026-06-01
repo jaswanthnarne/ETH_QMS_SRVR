@@ -275,7 +275,27 @@ exports.startAttempt = async (req, res) => {
                 assignedQuestions,
                 clientSessionId: crypto.randomUUID()
             });
-            await attempt.save();
+            try {
+                await attempt.save();
+            } catch (saveError) {
+                if (saveError.code === 11000 || saveError.message?.includes('11000') || saveError.message?.includes('duplicate key')) {
+                    attempt = await StudentAttempt.findOne({
+                        examId,
+                        'studentDetails.rollNumber': studentDetails.rollNumber
+                    });
+                    if (!attempt) throw saveError;
+                    if (attempt.status === 'completed') {
+                        return res.json({ success: true, data: attempt, message: 'Attempt already completed' });
+                    }
+                    attempt.studentDetails = { ...attempt.studentDetails, ...studentDetails };
+                    if (!attempt.ipAddress) attempt.ipAddress = ipAddress;
+                    if (!attempt.userAgent) attempt.userAgent = userAgent;
+                    if (!attempt.clientSessionId) attempt.clientSessionId = crypto.randomUUID();
+                    await attempt.save();
+                } else {
+                    throw saveError;
+                }
+            }
         } else if (attempt.status === 'completed') {
             return res.json({ success: true, data: attempt, message: 'Attempt already completed' });
         } else {
