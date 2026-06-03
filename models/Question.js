@@ -61,4 +61,7 @@ const questionSchema = new mongoose.Schema({
     timestamps: true
 });
 
+// Index to optimize fetch queries by examId and avoid collection scans under high load
+questionSchema.index({ examId: 1 });
+
 module.exports = mongoose.model('Question', questionSchema);

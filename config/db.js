@@ -8,7 +8,7 @@ const connectDB = async () => {
 
     try {
         const conn = await mongoose.connect(process.env.MONGODB_URI, {
-            maxPoolSize: 10, // Optimize socket pooling for serverless environments
+            maxPoolSize: 100, // Expanded socket pool to support 1000+ concurrent students without HLB query blocking
             serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of hanging indefinitely
             socketTimeoutMS: 45000 // Close sockets after 45s of inactivity
         });

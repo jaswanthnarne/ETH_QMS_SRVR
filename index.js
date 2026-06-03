@@ -21,6 +21,8 @@ dotenv.config();
 connectDB();
 
 const app = express();
+// Trust reverse proxy headers (Vercel, Cloudflare, Nginx, etc.) to get correct client IPs
+app.set('trust proxy', true);
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
@@ -68,7 +70,24 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Rate limiters
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { success: false, error: 'Too many login attempts, please try again after 15 minutes' } });
-const examLimiter = rateLimit({ windowMs: 1 * 60 * 1000, max: 60, message: { success: false, error: 'Too many requests, please slow down' } });
+const examLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000,
+    max: 600, // Permissive up to 600 requests per minute per unique candidate key
+    validate: false, // Disable all internal validator warnings/validations for custom composite keyGenerator
+    keyGenerator: (req) => {
+        // Build composite key: IP + exam key + roll number (if available)
+        // This isolates students in a shared NAT IP computer lab so they do not throttle each other.
+        const roll = req.body?.rollNumber || req.query?.rollNumber || req.body?.studentDetails?.rollNumber || '';
+        const examKey = req.body?.key || req.body?.examKey || req.query?.key || '';
+        const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        
+        if (roll || examKey) {
+            return `${ip}_${examKey}_${roll}`;
+        }
+        return ip;
+    },
+    message: { success: false, error: 'Too many requests, please slow down' }
+});
 
 const TrainerExamKey = require('./models/TrainerExamKey');
 const ChatMessage = require('./models/ChatMessage');
