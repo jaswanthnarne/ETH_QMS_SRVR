@@ -1,6 +1,7 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 const http = require('http');
+const https = require('https');
 
 // Model Imports
 const College = require('./models/College');
@@ -69,7 +70,8 @@ async function runThrottlingTest() {
             status: 'published',
             collegeId: tempCollege._id,
             courseId: tempCourse._id,
-            createdBy: tempTrainer._id
+            createdBy: tempTrainer._id,
+            scheduledDate: new Date(Date.now() - 24 * 60 * 60 * 1000) // 1 day in the past to prevent clock drift issues
         });
 
         const testKey = `LTEST-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -114,8 +116,10 @@ async function runThrottlingTest() {
             const payload = JSON.stringify(body);
             const urlObj = new URL(`${targetUrl}${endpoint}`);
             
+            const client = urlObj.protocol === 'https:' ? https : http;
+            
             return new Promise((resolve, reject) => {
-                const req = http.request({
+                const req = client.request({
                     hostname: urlObj.hostname,
                     port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
                     path: urlObj.pathname + urlObj.search,
@@ -167,6 +171,9 @@ async function runThrottlingTest() {
                 stats.validateSuccess++;
             } else {
                 stats.validateFail++;
+                if (stats.validateFail === 1) {
+                    console.log(`DEBUG: Validate Fail Details: Status: ${vRes.status}, Error: ${vRes.error}`);
+                }
                 return; // halt flow if key validation fails
             }
 
