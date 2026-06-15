@@ -325,8 +325,31 @@ app.use('/api/question-bank', require('./routes/questionBankRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/attendance', require('./routes/attendanceRoutes'));
 
-app.get('/', (req, res) => {
-    res.send('QMS API is running...');
+app.get('/', async (req, res) => {
+    try {
+        const mongoose = require('mongoose');
+        const dbName = mongoose.connection.name;
+        const host = mongoose.connection.host;
+        
+        const Student = require('./models/Student');
+        const College = require('./models/College');
+        const studentCount = await Student.countDocuments();
+        const collegeCount = await College.countDocuments();
+        
+        const testStudent = await Student.findOne({ mobile: '9848218418' });
+        
+        res.json({
+            status: 'QMS API is running...',
+            database: dbName,
+            host: host,
+            studentCount,
+            collegeCount,
+            testStudentFound: !!testStudent,
+            testStudent: testStudent ? { name: testStudent.name, usn: testStudent.usn, mobile: testStudent.mobile } : null
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Automatically clean up stale disconnected student attempts
