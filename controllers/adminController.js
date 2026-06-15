@@ -3,10 +3,13 @@ const Course = require('../models/Course');
 const User = require('../models/User');
 const Exam = require('../models/Exam');
 const TrainerExamKey = require('../models/TrainerExamKey');
+const TrainerCourseMap = require('../models/TrainerCourseMap');
 const Question = require('../models/Question');
 const StudentAttempt = require('../models/StudentAttempt');
 const TrainingLog = require('../models/TrainingLog');
 const Batch = require('../models/Batch');
+const CollegeCourseMap = require('../models/CollegeCourseMap');
+const Student = require('../models/Student');
 
 const crypto = require('crypto');
 const mammoth = require('mammoth');
@@ -14,6 +17,27 @@ const pdfParse = require('pdf-parse');
 const bcrypt = require('bcryptjs');
 const ExcelJS = require('exceljs');
 const { logAudit } = require('../utils/auditHelper');
+const cloudinary = require('cloudinary').v2;
+
+const checkCollegeScope = (user, collegeId) => {
+    if (['regional_manager', 'asst_rm'].includes(user.role)) {
+        const collegesList = [
+            ...(user.collegeId ? [user.collegeId] : []),
+            ...(Array.isArray(user.assignedColleges) ? user.assignedColleges : [])
+        ].map(id => id.toString());
+        if (!collegeId || !collegesList.includes(collegeId.toString())) {
+            return false;
+        }
+    }
+    return true;
+};
+
+// Configure Cloudinary
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 const emitDataUpdated = (req, resource, action, data = {}) => {
     try {
@@ -36,9 +60,25 @@ exports.getColleges = async (req, res) => {
         let filter = {};
         if (req.user.role === 'college_admin') {
             filter = { _id: req.user.collegeId };
+        } else if (['trainer', 'regional_manager', 'asst_rm'].includes(req.user.role)) {
+            const collegesList = [
+                ...(req.user.collegeId ? [req.user.collegeId] : []),
+                ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges : [])
+            ];
+            filter = { _id: { $in: collegesList } };
         }
         const colleges = await College.find(filter);
         res.json({ success: true, count: colleges.length, data: colleges });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.getCollegeById = async (req, res) => {
+    try {
+        const college = await College.findById(req.params.id);
+        if (!college) return res.status(404).json({ success: false, error: 'College not found' });
+        res.json({ success: true, data: college });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
@@ -57,6 +97,9 @@ exports.createCollege = async (req, res) => {
 
 exports.updateCollege = async (req, res) => {
     try {
+        if (!checkCollegeScope(req.user, req.params.id)) {
+            return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
+        }
         const college = await College.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
         if (!college) return res.status(404).json({ success: false, error: 'College not found' });
         await logAudit(req, 'UPDATE_COLLEGE', 'College', college._id, college.name);
@@ -94,23 +137,131 @@ exports.deleteCollege = async (req, res) => {
     }
 };
 
+exports.uploadCollegeLogo = async (req, res) => {
+    try {
+        if (!checkCollegeScope(req.user, req.params.id)) {
+            return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
+        }
+
+        if (!req.file) {
+            return res.status(400).json({ success: false, error: 'Please upload an image file' });
+        }
+
+        const college = await College.findById(req.params.id);
+        if (!college) {
+            return res.status(404).json({ success: false, error: 'College not found' });
+        }
+
+        // Upload image to Cloudinary from memory buffer
+        const uploadStream = () => {
+            return new Promise((resolve, reject) => {
+                const stream = cloudinary.uploader.upload_stream(
+                    {
+                        folder: 'college_logos',
+                        transformation: [{ width: 250, height: 250, crop: 'limit' }]
+                    },
+                    (error, result) => {
+                        if (result) {
+                            resolve(result);
+                        } else {
+                            reject(error);
+                        }
+                    }
+                );
+                stream.end(req.file.buffer);
+            });
+        };
+
+        const result = await uploadStream();
+
+        // Save URL to database
+        college.logoUrl = result.secure_url;
+        await college.save();
+
+        await logAudit(req, 'UPLOAD_COLLEGE_LOGO', 'College', college._id, college.name, { logoUrl: college.logoUrl });
+
+        res.json({
+            success: true,
+            data: college,
+            message: 'Logo uploaded successfully'
+        });
+    } catch (error) {
+        console.error('Logo upload error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 // --- Course Controller ---
 exports.getCourses = async (req, res) => {
     try {
         let collegeId = req.params.collegeId || req.query.collegeId;
         
-        if (req.user.role === 'college_admin') {
+        if (req.user.role === 'college_admin' && req.query.global !== 'true') {
             collegeId = req.user.collegeId;
+        } else if (req.user.role === 'trainer') {
+            if (collegeId) {
+                const collegesList = [
+                    ...(req.user.collegeId ? [req.user.collegeId.toString()] : []),
+                    ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges.map(c => c.toString()) : [])
+                ];
+                if (!collegesList.includes(collegeId.toString())) {
+                    return res.status(403).json({ success: false, error: 'Not authorized to access courses for this college' });
+                }
+            }
         }
 
-        let filter = {};
+        let courses = [];
         if (collegeId) {
-            filter.collegeId = collegeId;
+            // Find courses created directly for this college
+            const directCourses = await Course.find({ collegeId })
+                .populate('collegeId', 'name')
+                .populate('createdBy', 'firstName lastName username role');
+
+            // Find courses mapped via CollegeCourseMap
+            const mappings = await CollegeCourseMap.find({ collegeId })
+                .populate({
+                    path: 'courseId',
+                    populate: [
+                        { path: 'collegeId', select: 'name' },
+                        { path: 'createdBy', select: 'firstName lastName username role' }
+                    ]
+                });
+            const mappedCourses = mappings.map(m => m.courseId).filter(Boolean);
+
+            // Merge and de-duplicate
+            const courseMap = new Map();
+            directCourses.forEach(c => courseMap.set(c._id.toString(), c));
+            mappedCourses.forEach(c => courseMap.set(c._id.toString(), c));
+            courses = Array.from(courseMap.values());
+        } else {
+            if (req.user.role === 'trainer') {
+                const collegesList = [
+                    ...(req.user.collegeId ? [req.user.collegeId] : []),
+                    ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges : [])
+                ];
+                // Fetch mapped courses for their colleges
+                const mappings = await CollegeCourseMap.find({ collegeId: { $in: collegesList } }).select('courseId');
+                const collegeCourseIds = mappings.map(m => m.courseId);
+
+                // Filter by assignedCourses OR courses mapped to their colleges
+                const trainerCoursesFilter = {
+                    $or: [
+                        { _id: { $in: req.user.assignedCourses || [] } },
+                        { _id: { $in: collegeCourseIds } },
+                        { collegeId: { $in: collegesList } }
+                    ]
+                };
+
+                courses = await Course.find(trainerCoursesFilter)
+                    .populate('collegeId', 'name')
+                    .populate('createdBy', 'firstName lastName username role');
+            } else {
+                courses = await Course.find({})
+                    .populate('collegeId', 'name')
+                    .populate('createdBy', 'firstName lastName username role');
+            }
         }
 
-        const courses = await Course.find(filter)
-            .populate('collegeId', 'name')
-            .populate('createdBy', 'firstName lastName username role');
         res.json({ success: true, count: courses.length, data: courses });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -124,15 +275,20 @@ exports.createCourse = async (req, res) => {
             collegeId = req.user.collegeId;
         }
 
-        if (!collegeId) {
-            return res.status(400).json({ success: false, error: 'College ID is required' });
+        if (collegeId && !checkCollegeScope(req.user, collegeId)) {
+            return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
         }
 
-        const course = await Course.create({ 
+        const courseData = { 
             ...req.body, 
-            collegeId,
             createdBy: req.user._id 
-        });
+        };
+        
+        if (collegeId) {
+            courseData.collegeId = collegeId;
+        }
+
+        const course = await Course.create(courseData);
         
         if (req.user.role === 'trainer') {
             await User.findByIdAndUpdate(req.user._id, {
@@ -149,6 +305,11 @@ exports.createCourse = async (req, res) => {
 
 exports.updateCourse = async (req, res) => {
     try {
+        const courseCheck = await Course.findById(req.params.id);
+        if (courseCheck && courseCheck.collegeId && !checkCollegeScope(req.user, courseCheck.collegeId)) {
+            return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
+        }
+
         const course = await Course.findByIdAndUpdate(req.params.id, req.body, {
             new: true,
             runValidators: true
@@ -192,9 +353,7 @@ exports.getTrainers = async (req, res) => {
         if (collegeId) {
             filter.$or = [
                 { collegeId: collegeId },
-                { assignedColleges: collegeId },
-                { collegeId: null },
-                { collegeId: { $exists: false } }
+                { assignedColleges: collegeId }
             ];
         }
 
@@ -220,10 +379,36 @@ exports.getTrainers = async (req, res) => {
             }
         });
 
-        const trainers = trainersList.map(t => ({
-            ...t,
-            testsCount: countMap[t._id.toString()] || 0
-        }));
+        // Query active trainer-course mappings for this college to scope assignedCourses
+        let activeMappings = [];
+        if (collegeId) {
+            activeMappings = await TrainerCourseMap.find({
+                collegeId: collegeId,
+                status: 'active'
+            });
+        }
+
+        const trainers = trainersList.map(t => {
+            let coursesForThisCollege = t.assignedCourses || [];
+            if (collegeId) {
+                const mappingsForTrainer = activeMappings.filter(m => m.trainerId?.toString() === t._id.toString());
+                const mappedCourseIds = mappingsForTrainer.map(m => m.courseId?.toString());
+                coursesForThisCollege = coursesForThisCollege
+                    .filter(c => mappedCourseIds.includes(c._id?.toString() || c.toString()))
+                    .map(c => {
+                        const mObj = mappingsForTrainer.find(m => m.courseId?.toString() === (c._id || c).toString());
+                        return {
+                            ...c,
+                            classroomLocation: mObj ? mObj.classroomLocation : ''
+                        };
+                    });
+            }
+            return {
+                ...t,
+                assignedCourses: coursesForThisCollege,
+                testsCount: countMap[t._id.toString()] || 0
+            };
+        });
             
         res.json({ success: true, count: trainers.length, data: trainers });
     } catch (error) {
@@ -233,21 +418,67 @@ exports.getTrainers = async (req, res) => {
 
 exports.createTrainer = async (req, res) => {
     try {
-        let { password, collegeId, assignedColleges, assignedCourses, firstName, lastName, phone, employeeId } = req.body;
+        let { password, collegeId, assignedColleges, assignedCourses, firstName, lastName, phone, employeeId, classroomLocation } = req.body;
         
         if (req.user.role === 'college_admin') {
             collegeId = req.user.collegeId;
         }
 
+        if (collegeId && !checkCollegeScope(req.user, collegeId)) {
+            return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
+        }
+        if (Array.isArray(assignedColleges)) {
+            for (const col of assignedColleges) {
+                if (!checkCollegeScope(req.user, col)) {
+                    return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
+                }
+            }
+        }
+
         if (!phone) return res.status(400).json({ success: false, error: 'Mobile number is required' });
         if (!password) return res.status(400).json({ success: false, error: 'Password is required' });
 
-        const existing = await User.findOne({ phone, role: 'trainer' });
-        if (existing) return res.status(400).json({ success: false, error: 'A trainer with this mobile number already exists' });
+        const existing = await User.findOne({ phone, role: 'trainer' }).populate('collegeId', 'name');
+        if (existing) {
+            return res.status(400).json({
+                success: false,
+                error: 'A trainer with this mobile number already exists',
+                existingTrainer: {
+                    _id: existing._id,
+                    firstName: existing.firstName,
+                    lastName: existing.lastName,
+                    phone: existing.phone,
+                    employeeId: existing.employeeId,
+                    collegeId: existing.collegeId?._id || existing.collegeId,
+                    collegeName: existing.collegeId?.name || 'Global / Unrestricted',
+                    assignedColleges: existing.assignedColleges || []
+                }
+            });
+        }
 
         if (employeeId) {
-            const existingEmp = await User.findOne({ employeeId });
-            if (existingEmp) return res.status(400).json({ success: false, error: 'A trainer with this Employee ID already exists' });
+            const existingEmp = await User.findOne({ employeeId }).populate('collegeId', 'name');
+            if (existingEmp) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'A trainer with this Employee ID already exists',
+                    existingTrainer: {
+                        _id: existingEmp._id,
+                        firstName: existingEmp.firstName,
+                        lastName: existingEmp.lastName,
+                        phone: existingEmp.phone,
+                        employeeId: existingEmp.employeeId,
+                        collegeId: existingEmp.collegeId?._id || existingEmp.collegeId,
+                        collegeName: existingEmp.collegeId?.name || 'Global / Unrestricted',
+                        assignedColleges: existingEmp.assignedColleges || []
+                    }
+                });
+            }
+        }
+
+        const classroomLocations = [];
+        if (collegeId && classroomLocation) {
+            classroomLocations.push({ collegeId, location: classroomLocation });
         }
 
         const trainer = await User.create({
@@ -260,8 +491,24 @@ exports.createTrainer = async (req, res) => {
             collegeId: collegeId || null,
             assignedColleges: assignedColleges || [],
             assignedCourses: assignedCourses || [],
+            classroomLocations: [],
             username: employeeId || phone // Default to employeeId, fallback to phone
         });
+
+        // Create TrainerCourseMap entries for the initial courses assigned to them
+        if (trainer && collegeId && assignedCourses && assignedCourses.length > 0) {
+            const courseLocations = req.body.courseLocations || {};
+            for (const courseId of assignedCourses) {
+                const cloc = courseLocations[courseId] || '';
+                await TrainerCourseMap.create({
+                    trainerId: trainer._id,
+                    collegeId: collegeId,
+                    courseId: courseId,
+                    classroomLocation: cloc,
+                    assignedBy: req.user._id
+                });
+            }
+        }
 
         await logAudit(req, 'CREATE_TRAINER', 'User', trainer._id, `${trainer.firstName} ${trainer.lastName}`.trim() || trainer.phone);
         emitDataUpdated(req, 'trainers', 'create', { id: trainer._id, name: `${trainer.firstName} ${trainer.lastName}`.trim() || trainer.phone });
@@ -274,12 +521,44 @@ exports.createTrainer = async (req, res) => {
 exports.updateTrainer = async (req, res) => {
     try {
         const { id } = req.params;
+        const trainerCheck = await User.findById(id);
+        if (!trainerCheck) return res.status(404).json({ success: false, error: 'Trainer not found' });
+        
+        if (['regional_manager', 'asst_rm'].includes(req.user.role)) {
+            const collegesList = [
+                ...(req.user.collegeId ? [req.user.collegeId] : []),
+                ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges : [])
+            ].map(id => id.toString());
+            
+            const trainerColleges = [
+                ...(trainerCheck.collegeId ? [trainerCheck.collegeId] : []),
+                ...(Array.isArray(trainerCheck.assignedColleges) ? trainerCheck.assignedColleges : [])
+            ].map(id => id.toString());
+            
+            const hasIntersection = trainerColleges.some(c => collegesList.includes(c));
+            if (!hasIntersection) {
+                return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
+            }
+        }
+
         const updateData = { ...req.body };
         delete updateData.role; // Never change role here
         if (updateData.collegeId === "" || updateData.collegeId === null) {
             updateData.collegeId = null;
         } else if (!updateData.collegeId) {
             delete updateData.collegeId;
+        } else {
+            if (!checkCollegeScope(req.user, updateData.collegeId)) {
+                return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
+            }
+        }
+
+        if (Array.isArray(updateData.assignedColleges)) {
+            for (const col of updateData.assignedColleges) {
+                if (!checkCollegeScope(req.user, col)) {
+                    return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
+                }
+            }
         }
 
         // If phone changed, update username fallback
@@ -291,11 +570,126 @@ exports.updateTrainer = async (req, res) => {
             updateData.username = updateData.employeeId;
         }
 
+        if (updateData.classroomLocation !== undefined) {
+            const targetCollegeId = req.query.collegeId || (req.user.role === 'college_admin' ? req.user.collegeId : req.body.collegeId);
+            if (targetCollegeId) {
+                const trainerToUpdate = await User.findById(id);
+                if (trainerToUpdate) {
+                    let locs = trainerToUpdate.classroomLocations || [];
+                    const index = locs.findIndex(l => l.collegeId?.toString() === targetCollegeId.toString());
+                    if (updateData.classroomLocation === "") {
+                        if (index >= 0) locs.splice(index, 1);
+                    } else {
+                        if (index >= 0) {
+                            locs[index].location = updateData.classroomLocation;
+                        } else {
+                            locs.push({ collegeId: targetCollegeId, location: updateData.classroomLocation });
+                        }
+                    }
+                    updateData.classroomLocations = locs;
+                }
+            }
+            delete updateData.classroomLocation;
+        }
+
         if (updateData.password) {
             const salt = await bcrypt.genSalt(10);
             updateData.password = await bcrypt.hash(updateData.password, salt);
         } else {
             delete updateData.password;
+        }
+
+        const targetCollegeId = req.query.collegeId || (req.user.role === 'college_admin' ? req.user.collegeId : req.body.collegeId);
+
+        if (targetCollegeId && updateData.assignedCourses) {
+            // Find all courses mapped to this college
+            const mappedCourses = await CollegeCourseMap.find({ collegeId: targetCollegeId });
+            const collegeCourseIds = mappedCourses.map(m => m.courseId.toString());
+
+            // The checked courses for this college sent from the frontend
+            const checkedLocalCourses = updateData.assignedCourses.map(c => c.toString());
+            // The unchecked courses for this college
+            const uncheckedLocalCourses = collegeCourseIds.filter(cid => !checkedLocalCourses.includes(cid));
+
+            // The courseLocations object sent from the frontend
+            const courseLocations = req.body.courseLocations || {};
+
+            // 1. Upsert checked courses into TrainerCourseMap
+            for (const courseId of checkedLocalCourses) {
+                const cloc = courseLocations[courseId] || '';
+                await TrainerCourseMap.findOneAndUpdate(
+                    { trainerId: id, collegeId: targetCollegeId, courseId },
+                    { 
+                        status: 'active', 
+                        assignedDate: new Date(), 
+                        assignedBy: req.user._id,
+                        classroomLocation: cloc
+                    },
+                    { upsert: true }
+                );
+            }
+
+            // 2. Delete unchecked courses from TrainerCourseMap
+            if (uncheckedLocalCourses.length > 0) {
+                await TrainerCourseMap.deleteMany({
+                    trainerId: id,
+                    collegeId: targetCollegeId,
+                    courseId: { $in: uncheckedLocalCourses }
+                });
+            }
+
+            // 3. Re-calculate global assignedCourses based on all TrainerCourseMap entries
+            const allActiveMaps = await TrainerCourseMap.find({ trainerId: id, status: 'active' });
+            const activeCourses = [...new Set(allActiveMaps.map(m => m.courseId.toString()))];
+            updateData.assignedCourses = activeCourses;
+
+            // 4. Update assignedColleges list
+            const oldTrainerDoc = await User.findById(id);
+            if (oldTrainerDoc) {
+                let updatedColleges = oldTrainerDoc.assignedColleges?.map(c => c.toString()) || [];
+                if (checkedLocalCourses.length > 0) {
+                    if (oldTrainerDoc.collegeId?.toString() !== targetCollegeId.toString()) {
+                        if (!updatedColleges.includes(targetCollegeId.toString())) {
+                            updatedColleges.push(targetCollegeId.toString());
+                        }
+                    }
+                } else {
+                    updatedColleges = updatedColleges.filter(c => c !== targetCollegeId.toString());
+                }
+                updateData.assignedColleges = updatedColleges;
+            }
+            
+            // Clean up properties that shouldn't be saved directly on the User model
+            delete updateData.courseLocations;
+        } else if (updateData.assignedColleges || updateData.assignedCourses) {
+            // If assignedColleges or assignedCourses are updated globally (e.g. from global dashboard), sync with TrainerCourseMap
+            const oldTrainer = await User.findById(id);
+            if (oldTrainer) {
+                const oldColleges = oldTrainer.assignedColleges?.map(c => c.toString()) || [];
+                const oldCourses = oldTrainer.assignedCourses?.map(c => c.toString()) || [];
+
+                if (updateData.assignedColleges) {
+                    const newColleges = updateData.assignedColleges.map(c => c.toString());
+                    const removedColleges = oldColleges.filter(c => !newColleges.includes(c));
+                    if (removedColleges.length > 0) {
+                        await TrainerCourseMap.deleteMany({
+                            trainerId: id,
+                            collegeId: { $in: removedColleges }
+                        });
+                    }
+                }
+
+                if (updateData.assignedCourses) {
+                    const newCourses = updateData.assignedCourses.map(c => c.toString());
+                    const removedCourses = oldCourses.filter(c => !newCourses.includes(c));
+                    if (removedCourses.length > 0) {
+                        await TrainerCourseMap.deleteMany({
+                            trainerId: id,
+                            courseId: { $in: removedCourses }
+                        });
+                    }
+                }
+            }
         }
 
         const trainer = await User.findByIdAndUpdate(id, updateData, {
@@ -320,11 +714,165 @@ exports.deleteTrainer = async (req, res) => {
         }
         
         await logAudit(req, 'DELETE_TRAINER', 'User', trainer._id, `${trainer.firstName} ${trainer.lastName}`.trim() || trainer.phone);
+        await TrainerCourseMap.deleteMany({ trainerId: trainer._id });
         await trainer.deleteOne();
         emitDataUpdated(req, 'trainers', 'delete', { id: trainer._id });
         res.json({ success: true, message: 'Trainer access revoked' });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.uploadTrainerPdf = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, error: 'Please upload a PDF file' });
+        }
+
+        const trainer = await User.findById(req.params.id);
+        if (!trainer || trainer.role !== 'trainer') {
+            return res.status(404).json({ success: false, error: 'Trainer not found' });
+        }
+
+        const uploadStream = () => {
+            return new Promise((resolve, reject) => {
+                const stream = cloudinary.uploader.upload_stream(
+                    {
+                        folder: 'trainer_details_pdfs',
+                        resource_type: 'raw'
+                    },
+                    (error, result) => {
+                        if (result) {
+                            resolve(result);
+                        } else {
+                            reject(error);
+                        }
+                    }
+                );
+                stream.end(req.file.buffer);
+            });
+        };
+
+        const result = await uploadStream();
+
+        // Save URL to database
+        trainer.pdfUrl = result.secure_url;
+        await trainer.save();
+
+        await logAudit(req, 'UPLOAD_TRAINER_PDF', 'User', trainer._id, `${trainer.firstName} ${trainer.lastName}`.trim() || trainer.phone, { pdfUrl: trainer.pdfUrl });
+        emitDataUpdated(req, 'trainers', 'update', { id: trainer._id, name: `${trainer.firstName} ${trainer.lastName}`.trim() || trainer.phone });
+
+        res.json({
+            success: true,
+            data: trainer,
+            message: 'PDF uploaded successfully'
+        });
+    } catch (error) {
+        console.error('Trainer PDF upload error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+const https = require('https');
+
+exports.downloadTrainerPdf = async (req, res) => {
+    try {
+        const trainer = await User.findById(req.params.id);
+        if (!trainer || !trainer.pdfUrl) {
+            return res.status(404).json({ success: false, error: 'PDF not found' });
+        }
+
+        https.get(trainer.pdfUrl, (response) => {
+            if (response.statusCode >= 400) {
+                return res.status(response.statusCode).json({ success: false, error: 'Failed to retrieve PDF from storage' });
+            }
+
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', 'inline; filename="trainer_details.pdf"');
+            response.pipe(res);
+        }).on('error', (error) => {
+            console.error('Error downloading trainer PDF:', error);
+            res.status(500).json({ success: false, error: 'Failed to retrieve PDF file' });
+        });
+    } catch (error) {
+        console.error('Error fetching trainer for PDF download:', error);
+        res.status(500).json({ success: false, error: 'Internal Server Error' });
+    }
+};
+
+exports.uploadCourseSyllabus = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, error: 'Please upload a PDF file' });
+        }
+
+        const course = await Course.findById(req.params.id);
+        if (!course) {
+            return res.status(404).json({ success: false, error: 'Course not found' });
+        }
+
+        // Upload PDF to Cloudinary as raw resource type
+        const uploadStream = () => {
+            return new Promise((resolve, reject) => {
+                const stream = cloudinary.uploader.upload_stream(
+                    {
+                        folder: 'course_syllabi',
+                        resource_type: 'raw'
+                    },
+                    (error, result) => {
+                        if (result) {
+                            resolve(result);
+                        } else {
+                            reject(error);
+                        }
+                    }
+                );
+                stream.end(req.file.buffer);
+            });
+        };
+
+        const result = await uploadStream();
+
+        // Save URL to database
+        course.syllabusUrl = result.secure_url;
+        await course.save();
+
+        await logAudit(req, 'UPLOAD_COURSE_SYLLABUS', 'Course', course._id, course.name, { syllabusUrl: course.syllabusUrl });
+        emitDataUpdated(req, 'courses', 'update', { id: course._id, name: course.name });
+
+        res.json({
+            success: true,
+            data: course,
+            message: 'Syllabus PDF uploaded successfully'
+        });
+    } catch (error) {
+        console.error('Course syllabus upload error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.downloadCourseSyllabus = async (req, res) => {
+    try {
+        const course = await Course.findById(req.params.id);
+        if (!course || !course.syllabusUrl) {
+            return res.status(404).json({ success: false, error: 'Syllabus PDF not found' });
+        }
+
+        https.get(course.syllabusUrl, (response) => {
+            if (response.statusCode >= 400) {
+                return res.status(response.statusCode).json({ success: false, error: 'Failed to retrieve Syllabus from storage' });
+            }
+
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', 'inline; filename="course_syllabus.pdf"');
+            response.pipe(res);
+        }).on('error', (error) => {
+            console.error('Error downloading course syllabus:', error);
+            res.status(500).json({ success: false, error: 'Failed to retrieve Syllabus file' });
+        });
+    } catch (error) {
+        console.error('Error fetching course for syllabus download:', error);
+        res.status(500).json({ success: false, error: 'Internal Server Error' });
     }
 };
 
@@ -335,6 +883,10 @@ exports.createExam = async (req, res) => {
             collegeId, courseId, title, department, description, duration, 
             totalMarks, passingMarks, instructions, settings, questions, batches
         } = req.body;
+
+        if (collegeId && !checkCollegeScope(req.user, collegeId)) {
+            return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
+        }
 
         // 1. Create the Exam
         const exam = await Exam.create({
@@ -446,6 +998,14 @@ exports.updateExam = async (req, res) => {
         
         let exam = await Exam.findById(id);
         if (!exam) return res.status(404).json({ success: false, error: 'Exam not found' });
+
+        if (exam.collegeId && !checkCollegeScope(req.user, exam.collegeId)) {
+            return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
+        }
+
+        if (payload.collegeId && !checkCollegeScope(req.user, payload.collegeId)) {
+            return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
+        }
 
         if (req.user.role === 'trainer' && exam.createdBy.toString() !== req.user._id.toString()) {
             return res.status(403).json({ success: false, error: 'Not authorized to update this exam' });
@@ -653,49 +1213,118 @@ exports.getDashboardStats = async (req, res) => {
     try {
         let filter = {};
         let attemptFilter = {};
+        let collegeExamIds = [];
         
-        const collegeId = req.query.collegeId || (req.user.role === 'college_admin' ? req.user.collegeId : null);
+        const isRegionalRole = ['regional_manager', 'asst_rm'].includes(req.user.role);
+        const collegesList = isRegionalRole ? [
+            ...(req.user.collegeId ? [req.user.collegeId] : []),
+            ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges : [])
+        ].map(id => id.toString()) : [];
 
+        let collegeId = req.query.collegeId;
+        if (req.user.role === 'college_admin') {
+            collegeId = req.user.collegeId;
+        } else if (isRegionalRole && !collegeId) {
+            if (collegesList.length === 1) {
+                collegeId = collegesList[0];
+            }
+        }
+
+        if (collegeId && isRegionalRole && !collegesList.includes(collegeId.toString())) {
+            return res.status(403).json({ success: false, error: 'Unauthorized to view this college context' });
+        }
+
+        let collegeTrainerIds = [];
         if (collegeId) {
             filter.collegeId = collegeId;
             const collegeExams = await Exam.find({ collegeId }).select('_id');
-            attemptFilter.examId = { $in: collegeExams.map(e => e._id) };
+            collegeExamIds = collegeExams.map(e => e._id);
+            attemptFilter.examId = { $in: collegeExamIds };
+
+            const [mappings, collegeBatches] = await Promise.all([
+                TrainerCourseMap.find({ collegeId, status: 'active' }).select('trainerId'),
+                Batch.find({ collegeId }).select('trainerId')
+            ]);
+            const idsFromMappings = mappings.map(m => m.trainerId?.toString()).filter(Boolean);
+            const idsFromBatches = collegeBatches.map(b => b.trainerId?.toString()).filter(Boolean);
+            collegeTrainerIds = [...new Set([...idsFromMappings, ...idsFromBatches])];
+        } else if (isRegionalRole) {
+            filter.collegeId = { $in: collegesList };
+            const collegeExams = await Exam.find({ collegeId: { $in: collegesList } }).select('_id');
+            collegeExamIds = collegeExams.map(e => e._id);
+            attemptFilter.examId = { $in: collegeExamIds };
+
+            const [mappings, collegeBatches] = await Promise.all([
+                TrainerCourseMap.find({ collegeId: { $in: collegesList }, status: 'active' }).select('trainerId'),
+                Batch.find({ collegeId: { $in: collegesList } }).select('trainerId')
+            ]);
+            const idsFromMappings = mappings.map(m => m.trainerId?.toString()).filter(Boolean);
+            const idsFromBatches = collegeBatches.map(b => b.trainerId?.toString()).filter(Boolean);
+            collegeTrainerIds = [...new Set([...idsFromMappings, ...idsFromBatches])];
         }
 
-        const [colleges, courses, trainers, exams, attempts, totalQuestions] = await Promise.all([
-            College.countDocuments(req.user.role === 'super_admin' ? {} : { _id: req.user.collegeId }),
-            Course.countDocuments(filter),
+        const [colleges, courses, trainers, exams, attempts, totalQuestions, batches, students] = await Promise.all([
+            collegeId 
+                ? College.countDocuments({ _id: collegeId })
+                : (isRegionalRole ? College.countDocuments({ _id: { $in: collegesList } }) : College.countDocuments({})),
+            (async () => {
+                if (collegeId) {
+                    const createdCount = await Course.countDocuments({ collegeId });
+                    const mappedCount = await CollegeCourseMap.countDocuments({ collegeId });
+                    return createdCount + mappedCount;
+                } else if (isRegionalRole) {
+                    const createdCount = await Course.countDocuments({ collegeId: { $in: collegesList } });
+                    const mappedCount = await CollegeCourseMap.countDocuments({ collegeId: { $in: collegesList } });
+                    return createdCount + mappedCount;
+                } else {
+                    return await Course.countDocuments({});
+                }
+            })(),
             User.countDocuments({ 
                 role: 'trainer',
-                ...(req.user.role === 'college_admin' ? {
+                ...(collegeId ? {
                     $or: [
-                        { collegeId: req.user.collegeId },
-                        { assignedColleges: req.user.collegeId }
+                        { collegeId: collegeId },
+                        { assignedColleges: collegeId },
+                        { _id: { $in: collegeTrainerIds } }
                     ]
-                } : {})
+                } : (isRegionalRole ? {
+                    $or: [
+                        { collegeId: { $in: collegesList } },
+                        { assignedColleges: { $in: collegesList } },
+                        { _id: { $in: collegeTrainerIds } }
+                    ]
+                } : {}))
             }),
             Exam.countDocuments(filter),
             StudentAttempt.countDocuments(attemptFilter),
-            Question.countDocuments(attemptFilter.examId ? { examId: attemptFilter.examId } : {})
+            Question.countDocuments(attemptFilter.examId ? { examId: attemptFilter.examId } : {}),
+            Batch.countDocuments(collegeId ? { collegeId } : (isRegionalRole ? { collegeId: { $in: collegesList } } : {})),
+            Student.countDocuments(collegeId ? { collegeId } : (isRegionalRole ? { collegeId: { $in: collegesList } } : {}))
         ]);
 
         let trainerFilter = { role: 'trainer' };
-        if (req.user.role === 'college_admin') {
-            trainerFilter.$or = [
-                { collegeId: req.user.collegeId },
-                { assignedColleges: req.user.collegeId }
-            ];
-        } else if (collegeId) {
+        if (collegeId) {
             trainerFilter.$or = [
                 { collegeId: collegeId },
-                { assignedColleges: collegeId }
+                { assignedColleges: collegeId },
+                { _id: { $in: collegeTrainerIds } }
+            ];
+        } else if (isRegionalRole) {
+            trainerFilter.$or = [
+                { collegeId: { $in: collegesList } },
+                { assignedColleges: { $in: collegesList } },
+                { _id: { $in: collegeTrainerIds } }
             ];
         }
 
-        const trainerList = await User.find(trainerFilter).populate('collegeId', 'name').select('firstName lastName username collegeId lean');
+        const trainerList = await User.find(trainerFilter).populate('collegeId', 'name').select('firstName lastName username collegeId').lean();
         
         const activeTrainers = await Promise.all(trainerList.map(async (t) => {
-            const count = await StudentAttempt.countDocuments({ trainerId: t._id });
+            const count = await StudentAttempt.countDocuments({ 
+                trainerId: t._id,
+                ...(collegeId || isRegionalRole ? { examId: { $in: collegeExamIds } } : {})
+            });
             return {
                 id: t._id,
                 name: `${t.firstName || ''} ${t.lastName || ''}`.trim() || t.username,
@@ -714,7 +1343,9 @@ exports.getDashboardStats = async (req, res) => {
                 exams,
                 attempts,
                 totalQuestions,
-                activeTrainers
+                activeTrainers,
+                batches,
+                students
             }
         });
     } catch (error) {
@@ -828,6 +1459,11 @@ exports.getAllotments = async (req, res) => {
 
         if (req.user.role === 'trainer') {
             filter.trainerId = req.user._id;
+            if (collegeId) {
+                const exams = await Exam.find({ collegeId }).select('_id');
+                const examIds = exams.map(e => e._id);
+                filter.examId = { $in: examIds };
+            }
         } else if (collegeId) {
             // Find all exams for this college
             const exams = await Exam.find({ collegeId }).select('_id');
@@ -1033,6 +1669,7 @@ exports.parseDocument = async (req, res) => {
 // ========== Admin Training Logs ==========
 exports.getAdminTrainingLogs = async (req, res) => {
     try {
+        const AttendanceSession = require('../models/AttendanceSession');
         let filter = {};
         if (req.user.role === 'college_admin') {
             filter.collegeId = req.user.collegeId;
@@ -1043,18 +1680,176 @@ exports.getAdminTrainingLogs = async (req, res) => {
             }
         }
 
-        const { trainerId } = req.query;
+        const { trainerId, courseId } = req.query;
         if (trainerId && trainerId !== 'all') {
             filter.trainerId = trainerId;
         }
+        if (courseId && courseId !== 'all') {
+            filter.courseId = courseId;
+        }
 
-        const logs = await TrainingLog.find(filter)
+        const sessions = await AttendanceSession.find(filter)
             .populate('trainerId', 'username firstName lastName phone')
             .populate('collegeId', 'name')
             .populate('courseId', 'name code')
-            .sort({ logDate: -1, createdAt: -1 });
+            .populate('batchId', 'batchName department startDate')
+            .sort({ date: -1, createdAt: -1 });
 
-        res.json({ success: true, count: logs.length, data: logs });
+        // Map sessions directly to flat, detailed log rows
+        const data = sessions.map(sess => {
+            const trainerName = sess.trainerId
+                ? `${sess.trainerId.firstName || ''} ${sess.trainerId.lastName || ''}`.trim() || sess.trainerId.username
+                : 'System';
+            
+            const presentCount = sess.records?.filter(r => r.status === 'present' || r.status === 'late').length || 0;
+            const actualCount = sess.records?.length || 0;
+            const attRate = actualCount > 0 ? ((presentCount / actualCount) * 100).toFixed(1) : '0.0';
+
+            return {
+                _id: sess._id,
+                logDate: sess.createdAt,
+                sessionDate: sess.date,
+                trainerName,
+                trainerPhone: sess.trainerId?.phone || '—',
+                collegeId: sess.collegeId?._id || sess.collegeId,
+                collegeName: sess.collegeId?.name || '—',
+                courseId: sess.courseId?._id || sess.courseId,
+                courseName: sess.courseId?.name || '—',
+                courseCode: sess.courseId?.code || '—',
+                batchId: sess.batchId?._id || sess.batchId,
+                batchName: sess.batchId?.batchName || '—',
+                department: sess.batchId?.department || '—',
+                timeSlot: sess.period || 'Hour 1',
+                moduleTaught: sess.module || '—',
+                presentCount,
+                actualCount,
+                avgAttendance: attRate,
+                topicsCovered: sess.topic,
+                duration: sess.duration || 60
+            };
+        });
+
+        res.json({ success: true, count: data.length, data });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// --- Admin User Accounts Controller ---
+exports.getAdminUsers = async (req, res) => {
+    try {
+        const roles = ['ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm', 'college_admin'];
+        const users = await User.find({ role: { $in: roles } })
+            .select('-password')
+            .populate('collegeId', 'name')
+            .populate('assignedColleges', 'name')
+            .lean();
+        res.json({ success: true, count: users.length, data: users });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.createAdminUser = async (req, res) => {
+    try {
+        const { username, email, password, firstName, lastName, phone, role, collegeId, assignedColleges } = req.body;
+        
+        if (!password) {
+            return res.status(400).json({ success: false, error: 'Password is required' });
+        }
+        
+        if (username) {
+            const existingUser = await User.findOne({ username });
+            if (existingUser) return res.status(400).json({ success: false, error: 'Username already exists' });
+        }
+        if (email) {
+            const existingEmail = await User.findOne({ email });
+            if (existingEmail) return res.status(400).json({ success: false, error: 'Email already exists' });
+        }
+        if (phone) {
+            const existingPhone = await User.findOne({ phone, role });
+            if (existingPhone) return res.status(400).json({ success: false, error: `A user with role ${role} and this phone number already exists` });
+        }
+
+        const newUser = await User.create({
+            username,
+            email: email || undefined,
+            password,
+            firstName,
+            lastName,
+            phone,
+            role,
+            collegeId: collegeId || null,
+            assignedColleges: assignedColleges || []
+        });
+
+        await logAudit(req, 'CREATE_ADMIN_USER', 'User', newUser._id, `${newUser.firstName} ${newUser.lastName}`.trim() || newUser.username || newUser.email);
+        
+        const userResponse = newUser.toObject();
+        delete userResponse.password;
+
+        res.status(201).json({ success: true, data: userResponse });
+    } catch (error) {
+        res.status(400).json({ success: false, error: error.message });
+    }
+};
+
+exports.updateAdminUser = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userToUpdate = await User.findById(id);
+        if (!userToUpdate) return res.status(404).json({ success: false, error: 'User not found' });
+
+        const updateData = { ...req.body };
+        
+        if (updateData.role && !['ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm', 'college_admin'].includes(updateData.role)) {
+            delete updateData.role;
+        }
+
+        if (updateData.username) {
+            const existingUser = await User.findOne({ username: updateData.username, _id: { $ne: id } });
+            if (existingUser) return res.status(400).json({ success: false, error: 'Username already exists' });
+        }
+        if (updateData.email) {
+            const existingEmail = await User.findOne({ email: updateData.email, _id: { $ne: id } });
+            if (existingEmail) return res.status(400).json({ success: false, error: 'Email already exists' });
+        }
+
+        if (updateData.password) {
+            const salt = await bcrypt.genSalt(10);
+            updateData.password = await bcrypt.hash(updateData.password, salt);
+        } else {
+            delete updateData.password;
+        }
+
+        if (updateData.collegeId === "" || updateData.collegeId === null) {
+            updateData.collegeId = null;
+        }
+
+        const updatedUser = await User.findByIdAndUpdate(id, updateData, { new: true, runValidators: true })
+            .select('-password')
+            .populate('collegeId', 'name')
+            .populate('assignedColleges', 'name');
+
+        await logAudit(req, 'UPDATE_ADMIN_USER', 'User', updatedUser._id, `${updatedUser.firstName} ${updatedUser.lastName}`.trim() || updatedUser.username || updatedUser.email);
+        res.json({ success: true, data: updatedUser });
+    } catch (error) {
+        res.status(400).json({ success: false, error: error.message });
+    }
+};
+
+exports.deleteAdminUser = async (req, res) => {
+    try {
+        const userToDelete = await User.findById(req.params.id);
+        if (!userToDelete) return res.status(404).json({ success: false, error: 'User not found' });
+        
+        if (userToDelete.role === 'super_admin') {
+            return res.status(400).json({ success: false, error: 'Cannot delete super_admin account' });
+        }
+
+        await logAudit(req, 'DELETE_ADMIN_USER', 'User', userToDelete._id, `${userToDelete.firstName} ${userToDelete.lastName}`.trim() || userToDelete.username || userToDelete.email);
+        await userToDelete.deleteOne();
+        res.json({ success: true, message: 'User account deleted successfully' });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }

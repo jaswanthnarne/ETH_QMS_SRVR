@@ -3,8 +3,8 @@ const mongoose = require('mongoose');
 const courseSchema = new mongoose.Schema({
     collegeId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'College',
-        required: true
+        ref: 'College'
+        // No longer required — courses are global. Kept for backward compat during migration.
     },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
@@ -24,16 +24,21 @@ const courseSchema = new mongoose.Schema({
         type: Number,
         default: 5
     },
+    program: {
+        type: String,
+        enum: ['EWDP', 'CFS', 'PMKVY', 'CMKKY']
+    },
     status: {
         type: String,
         enum: ['active', 'inactive'],
         default: 'active'
-    }
+    },
+    syllabusUrl: String
 }, {
     timestamps: true
 });
 
-// Ensure course code is unique within a college
-courseSchema.index({ collegeId: 1, code: 1 }, { unique: true });
+// Course code is globally unique now
+courseSchema.index({ code: 1 }, { unique: true });
 
 module.exports = mongoose.model('Course', courseSchema);

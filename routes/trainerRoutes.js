@@ -45,10 +45,7 @@ router.put('/logs/:id', updateLog);
 router.delete('/logs/:id', deleteLog);
 
 // Trainer Batches CRUD Routes
-const { createBatch, getBatches, updateBatch, deleteBatch } = require('../controllers/batchController');
-router.post('/batches', createBatch);
+const { getBatches } = require('../controllers/batchController');
 router.get('/batches', getBatches);
-router.put('/batches/:id', updateBatch);
-router.delete('/batches/:id', deleteBatch);
 
 module.exports = router;

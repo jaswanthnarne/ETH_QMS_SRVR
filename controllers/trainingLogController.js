@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const TrainingLog = require('../models/TrainingLog');
 
 // @desc    Create a new daily training log
@@ -59,7 +60,19 @@ exports.createLog = async (req, res) => {
 // @access  Private (Trainer only)
 exports.getLogs = async (req, res) => {
     try {
-        const logs = await TrainingLog.find({ trainerId: req.user._id })
+        const filter = { trainerId: req.user._id };
+        const collegeId = req.query.collegeId;
+        if (collegeId && mongoose.Types.ObjectId.isValid(collegeId)) {
+            filter.collegeId = collegeId;
+        } else {
+            const collegesList = [
+                ...(req.user.collegeId ? [req.user.collegeId] : []),
+                ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges : [])
+            ];
+            filter.collegeId = { $in: collegesList };
+        }
+
+        const logs = await TrainingLog.find(filter)
             .populate('collegeId', 'name')
             .populate('courseId', 'name code')
             .sort({ logDate: -1, createdAt: -1 });

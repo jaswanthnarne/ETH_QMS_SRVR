@@ -39,8 +39,12 @@ const userSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        enum: ['super_admin', 'college_admin', 'trainer'],
+        enum: ['super_admin', 'ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm', 'college_admin', 'trainer', 'student'],
         default: 'trainer'
+    },
+    program: {
+        type: String,
+        enum: ['EWDP', 'CFS', 'PMKVY', 'CMKKY']
     },
     collegeId: { // Primary College
         type: mongoose.Schema.Types.ObjectId,
@@ -54,6 +58,16 @@ const userSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Course'
     }],
+    classroomLocations: [{
+        collegeId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'College'
+        },
+        location: {
+            type: String
+        }
+    }],
+    pdfUrl: String,
     isActive: {
         type: Boolean,
         default: true

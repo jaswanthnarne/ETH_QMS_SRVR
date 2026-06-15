@@ -5,7 +5,7 @@ const AuditLog = require('../models/AuditLog');
 
 // All audit routes require auth
 router.use(protect);
-router.use(authorize('super_admin', 'college_admin'));
+router.use(authorize('super_admin', 'college_admin', 'ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm'));
 
 // GET /api/audit/logs — paginated audit logs
 router.get('/logs', async (req, res) => {
@@ -14,9 +14,25 @@ router.get('/logs', async (req, res) => {
         const limit = parseInt(req.query.limit) || 25;
         const skip = (page - 1) * limit;
 
+        const isRegionalRole = ['regional_manager', 'asst_rm'].includes(req.user.role);
+        const collegesList = isRegionalRole ? [
+            ...(req.user.collegeId ? [req.user.collegeId.toString()] : []),
+            ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges.map(c => c.toString()) : [])
+        ] : [];
+
         const filter = {};
         if (req.user.role === 'college_admin') {
             filter.collegeId = req.user.collegeId;
+        } else if (isRegionalRole) {
+            if (req.query.collegeId) {
+                if (collegesList.includes(req.query.collegeId.toString())) {
+                    filter.collegeId = req.query.collegeId;
+                } else {
+                    return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
+                }
+            } else {
+                filter.collegeId = { $in: collegesList };
+            }
         } else if (req.query.collegeId) {
             filter.collegeId = req.query.collegeId;
         }

@@ -14,6 +14,7 @@ const collegeSchema = new mongoose.Schema({
     address: String,
     contactEmail: String,
     contactPhone: String,
+    logoUrl: String,
     status: {
         type: String,
         enum: ['active', 'inactive'],

@@ -2,14 +2,21 @@ const Exam = require('../models/Exam');
 const Question = require('../models/Question');
 const TrainerExamKey = require('../models/TrainerExamKey');
 const StudentAttempt = require('../models/StudentAttempt');
+const Student = require('../models/Student');
+const Batch = require('../models/Batch');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 
 exports.getExamByEntryKey = async (req, res) => {
     try {
         const { key } = req.params;
         const { rollNumber } = req.query;
 
-        const trainerKey = await TrainerExamKey.findOne({ uniqueKey: key })
+        const query = mongoose.Types.ObjectId.isValid(key)
+            ? { $or: [{ uniqueKey: key }, { _id: key }] }
+            : { uniqueKey: key };
+
+        const trainerKey = await TrainerExamKey.findOne(query)
             .populate({
                 path: 'examId',
                 populate: { path: 'collegeId courseId', select: 'name code' }
@@ -37,6 +44,34 @@ exports.getExamByEntryKey = async (req, res) => {
         }
         if (exam.expiryDate && now > new Date(exam.expiryDate)) {
             return res.status(403).json({ success: false, error: 'This assessment has already expired and is no longer accessible.' });
+        }
+
+        if (rollNumber) {
+            const student = await Student.findOne({ usn: rollNumber, collegeId: exam.collegeId?._id || exam.collegeId }).populate('batchId');
+            if (!student) {
+                return res.status(403).json({
+                    success: false,
+                    error: `Roll Number ${rollNumber} is not registered in the system.`
+                });
+            }
+
+            const hasTargetedBatches = exam.batches && exam.batches.length > 0;
+            const isTargeted = !hasTargetedBatches || 
+                               exam.batches.some(b => b.toString() === student.batchId?._id?.toString()) ||
+                               (trainerKey?.batchId && trainerKey.batchId.toString() === student.batchId?._id?.toString());
+            if (!isTargeted) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'You are not registered in an authorized batch for this assessment.'
+                });
+            }
+
+            if (student.batchId?.status === 'completed') {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Your batch has already completed, and exam access is restricted.'
+                });
+            }
         }
 
         // Fetch questions
@@ -193,6 +228,42 @@ exports.validateExamKey = async (req, res) => {
         const exam = await Exam.findById(trainerKey.examId);
         if (!exam) return res.status(404).json({ success: false, error: 'Exam not found' });
 
+        let studentDetails = null;
+        if (rollNumber) {
+            const student = await Student.findOne({ usn: rollNumber, collegeId: exam.collegeId }).populate('batchId');
+            if (!student) {
+                return res.status(403).json({
+                    success: false,
+                    error: `Roll Number ${rollNumber} is not registered in the system.`
+                });
+            }
+
+            const hasTargetedBatches = exam.batches && exam.batches.length > 0;
+            const isTargeted = !hasTargetedBatches || 
+                               exam.batches.some(b => b.toString() === student.batchId?._id?.toString()) ||
+                               (trainerKey?.batchId && trainerKey.batchId.toString() === student.batchId?._id?.toString());
+            if (!isTargeted) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'You are not registered in an authorized batch for this assessment.'
+                });
+            }
+
+            if (student.batchId?.status === 'completed') {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Your batch has already completed, and exam access is restricted.'
+                });
+            }
+
+            studentDetails = {
+                name: student.name,
+                email: student.email,
+                mobile: student.mobile,
+                department: student.department
+            };
+        }
+
         // Check if student has already completed this exam
         const checkAttempt = await StudentAttempt.findOne({
             examId: trainerKey.examId,
@@ -221,7 +292,8 @@ exports.validateExamKey = async (req, res) => {
             success: true,
             message: 'Key validated',
             isCompleted: !!checkAttempt,
-            settings: exam.settings || {}
+            settings: exam.settings || {},
+            student: studentDetails
         });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -234,13 +306,59 @@ exports.startAttempt = async (req, res) => {
         const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress;
         const userAgent = req.headers['user-agent'];
 
+        const rollNumber = studentDetails?.rollNumber;
+        if (!rollNumber) {
+            return res.status(400).json({ success: false, error: 'Roll number is required.' });
+        }
+
+        const exam = await Exam.findById(examId);
+        if (!exam) return res.status(404).json({ success: false, error: 'Exam not found' });
+
+        const student = await Student.findOne({ usn: rollNumber, collegeId: exam.collegeId }).populate('batchId');
+        if (!student) {
+            return res.status(403).json({
+                success: false,
+                error: `Roll Number ${rollNumber} is not registered in the system.`
+            });
+        }
+
+        // Check if student's batch is targeted by the exam
+        const trainerKey = await TrainerExamKey.findById(sessionId);
+        const hasTargetedBatches = exam.batches && exam.batches.length > 0;
+        const isTargeted = !hasTargetedBatches || 
+                           exam.batches.some(b => b.toString() === student.batchId?._id?.toString()) ||
+                           (trainerKey?.batchId && trainerKey.batchId.toString() === student.batchId?._id?.toString());
+        if (!isTargeted) {
+            return res.status(403).json({
+                success: false,
+                error: 'You are not registered in an authorized batch for this assessment.'
+            });
+        }
+
+        // Check batch status
+        if (student.batchId?.status === 'completed') {
+            return res.status(403).json({
+                success: false,
+                error: 'Your batch has already completed, and exam access is restricted.'
+            });
+        }
+
+        const verifiedStudentDetails = {
+            name: student.name,
+            rollNumber: student.usn,
+            mobile: student.mobile || '',
+            email: student.email || '',
+            department: student.department || '',
+            college: studentDetails?.college || '',
+            course: studentDetails?.course || ''
+        };
+
         let attempt = await StudentAttempt.findOne({
             examId,
-            'studentDetails.rollNumber': studentDetails.rollNumber
+            'studentDetails.rollNumber': rollNumber
         });
 
         if (!attempt) {
-            const exam = await Exam.findById(examId);
             let assignedQuestions = [];
 
             if (exam) {
@@ -267,7 +385,7 @@ exports.startAttempt = async (req, res) => {
                 examId,
                 sessionId,
                 trainerId,
-                studentDetails,
+                studentDetails: verifiedStudentDetails,
                 status: 'started',
                 startedAt: new Date(),
                 ipAddress,
@@ -281,13 +399,13 @@ exports.startAttempt = async (req, res) => {
                 if (saveError.code === 11000 || saveError.message?.includes('11000') || saveError.message?.includes('duplicate key')) {
                     attempt = await StudentAttempt.findOne({
                         examId,
-                        'studentDetails.rollNumber': studentDetails.rollNumber
+                        'studentDetails.rollNumber': rollNumber
                     });
                     if (!attempt) throw saveError;
                     if (attempt.status === 'completed') {
                         return res.json({ success: true, data: attempt, message: 'Attempt already completed' });
                     }
-                    attempt.studentDetails = { ...attempt.studentDetails, ...studentDetails };
+                    attempt.studentDetails = verifiedStudentDetails;
                     if (!attempt.ipAddress) attempt.ipAddress = ipAddress;
                     if (!attempt.userAgent) attempt.userAgent = userAgent;
                     if (!attempt.clientSessionId) attempt.clientSessionId = crypto.randomUUID();
@@ -299,7 +417,7 @@ exports.startAttempt = async (req, res) => {
         } else if (attempt.status === 'completed') {
             return res.json({ success: true, data: attempt, message: 'Attempt already completed' });
         } else {
-            attempt.studentDetails = { ...attempt.studentDetails, ...studentDetails };
+            attempt.studentDetails = verifiedStudentDetails;
             if (!attempt.ipAddress) attempt.ipAddress = ipAddress;
             if (!attempt.userAgent) attempt.userAgent = userAgent;
             if (!attempt.clientSessionId) attempt.clientSessionId = crypto.randomUUID();

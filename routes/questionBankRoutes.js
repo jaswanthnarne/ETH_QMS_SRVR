@@ -11,7 +11,7 @@ const {
 } = require('../controllers/questionBankController');
 
 router.use(protect);
-router.use(authorize('super_admin', 'college_admin'));
+router.use(authorize('super_admin', 'college_admin', 'ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm'));
 
 router.get('/', getQuestions);
 router.get('/stats', getBankStats);

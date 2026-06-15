@@ -317,11 +317,13 @@ io.on('connection', (socket) => {
 app.use('/api/auth', authLimiter, require('./routes/authRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/trainer', require('./routes/trainerRoutes'));
+app.use('/api/student', require('./routes/studentRoutes'));
 app.use('/api/exam', examLimiter, require('./routes/examRoutes'));
 app.use('/api/analytics', require('./routes/analyticsRoutes'));
 app.use('/api/audit', require('./routes/auditRoutes'));
 app.use('/api/question-bank', require('./routes/questionBankRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/attendance', require('./routes/attendanceRoutes'));
 
 app.get('/', (req, res) => {
     res.send('QMS API is running...');

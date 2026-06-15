@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const TrainerExamKey = require('../models/TrainerExamKey');
 const Exam = require('../models/Exam');
 const StudentAttempt = require('../models/StudentAttempt');
@@ -10,6 +11,7 @@ const TrainingLog = require('../models/TrainingLog');
 exports.getAssignedExams = async (req, res) => {
     try {
         const trainerId = req.user._id;
+        const collegeId = req.query.collegeId;
 
         // Get all keys for this trainer
         const assignedKeys = await TrainerExamKey.find({ trainerId })
@@ -26,6 +28,7 @@ exports.getAssignedExams = async (req, res) => {
         const formattedExams = assignedKeys
             .filter(ak => {
                 if (!ak.examId || ak.examId.status !== 'published') return false;
+                if (collegeId && ak.examId.collegeId?._id?.toString() !== collegeId) return false;
                 return true;
             })
             .map(ak => ({
@@ -54,19 +57,51 @@ exports.getAssignedExams = async (req, res) => {
 exports.getTrainerStats = async (req, res) => {
     try {
         const trainerId = req.user._id;
+        const collegeId = req.query.collegeId;
 
         // Perform parallel fast count queries
-        const [assignedExamsCount, totalBatches, totalLogs, trainer] = await Promise.all([
-            TrainerExamKey.countDocuments({ trainerId }),
-            Batch.countDocuments({ trainerId }),
-            TrainingLog.countDocuments({ trainerId }),
+        let keyQuery = { trainerId };
+        let assignedExamsCount = 0;
+        
+        if (collegeId) {
+            const examsForCollege = await Exam.find({ collegeId }).select('_id');
+            const examIds = examsForCollege.map(e => e._id);
+            assignedExamsCount = await TrainerExamKey.countDocuments({ trainerId, examId: { $in: examIds } });
+        } else {
+            assignedExamsCount = await TrainerExamKey.countDocuments({ trainerId });
+        }
+
+        let batchQuery = { trainerId };
+        if (collegeId) batchQuery.collegeId = collegeId;
+
+        let logQuery = { trainerId };
+        if (collegeId) logQuery.collegeId = collegeId;
+
+        const [totalBatches, totalLogs, trainer] = await Promise.all([
+            Batch.countDocuments(batchQuery),
+            TrainingLog.countDocuments(logQuery),
             User.findById(trainerId).select('assignedCourses')
         ]);
-        const totalCourses = trainer?.assignedCourses?.length || 0;
+
+        let totalCourses = trainer?.assignedCourses?.length || 0;
+        if (collegeId) {
+            const Course = require('../models/Course');
+            totalCourses = await Course.countDocuments({
+                _id: { $in: trainer?.assignedCourses || [] },
+                collegeId
+            });
+        }
+
+        let attemptMatch = { trainerId };
+        if (collegeId) {
+            const examsForCollege = await Exam.find({ collegeId }).select('_id');
+            const examIds = examsForCollege.map(e => e._id);
+            attemptMatch.examId = { $in: examIds };
+        }
 
         // Fast Single Aggregation Group for Overall stats
         const overallStats = await StudentAttempt.aggregate([
-            { $match: { trainerId } },
+            { $match: attemptMatch },
             {
                 $group: {
                     _id: null,
@@ -84,7 +119,7 @@ exports.getTrainerStats = async (req, res) => {
 
         // Fast Aggregation Group for Exam Breakdown
         const breakdownStats = await StudentAttempt.aggregate([
-            { $match: { trainerId } },
+            { $match: attemptMatch },
             {
                 $group: {
                     _id: "$examId",
@@ -240,7 +275,11 @@ exports.startSession = async (req, res) => {
 // Get all exams created by the trainer, regardless of status
 exports.getTrainerExams = async (req, res) => {
     try {
+        const collegeId = req.query.collegeId;
         const filter = { createdBy: req.user._id };
+        if (collegeId && mongoose.Types.ObjectId.isValid(collegeId)) {
+            filter.collegeId = collegeId;
+        }
         
         const exams = await Exam.find(filter)
             .populate('courseId', 'name code')

@@ -4,7 +4,7 @@ const batchSchema = new mongoose.Schema({
     trainerId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true
+        required: false
     },
     collegeId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -14,7 +14,7 @@ const batchSchema = new mongoose.Schema({
     courseId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Course',
-        required: true
+        required: false
     },
     batchName: {
         type: String,
@@ -23,6 +23,21 @@ const batchSchema = new mongoose.Schema({
     department: {
         type: String,
         required: true
+    },
+    program: {
+        type: String,
+        enum: ['EWDP', 'CFS', 'PMKVY', 'CMKKY']
+    },
+    startDate: Date,
+    endDate: Date,
+    status: {
+        type: String,
+        enum: ['active', 'completed', 'upcoming'],
+        default: 'active'
+    },
+    studentCount: {
+        type: Number,
+        default: 0
     }
 }, {
     timestamps: true
@@ -30,5 +45,7 @@ const batchSchema = new mongoose.Schema({
 
 batchSchema.index({ trainerId: 1 });
 batchSchema.index({ collegeId: 1 });
+batchSchema.index({ collegeId: 1, courseId: 1 }); // Fast lookup for college-course batches
+batchSchema.index({ collegeId: 1, batchName: 1 }, { unique: true }); // Prevent duplicate names in the same college
 
 module.exports = mongoose.model('Batch', batchSchema);
