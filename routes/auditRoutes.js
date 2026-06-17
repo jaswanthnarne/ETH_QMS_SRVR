@@ -5,7 +5,7 @@ const AuditLog = require('../models/AuditLog');
 
 // All audit routes require auth
 router.use(protect);
-router.use(authorize('super_admin', 'college_admin', 'ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm'));
+router.use(authorize('super_admin', 'college_admin', 'ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm', 'placement'));
 
 // GET /api/audit/logs — paginated audit logs
 router.get('/logs', async (req, res) => {
@@ -21,7 +21,7 @@ router.get('/logs', async (req, res) => {
         ] : [];
 
         const filter = {};
-        if (req.user.role === 'college_admin') {
+        if (req.user.role === 'college_admin' || req.user.role === 'placement') {
             filter.collegeId = req.user.collegeId;
         } else if (isRegionalRole) {
             if (req.query.collegeId) {

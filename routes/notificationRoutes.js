@@ -5,7 +5,7 @@ const { getNotifications, markAsRead, clearAll } = require('../controllers/notif
 
 // Notifications are used by admins and trainers.
 router.use(protect);
-router.use(authorize('super_admin', 'college_admin', 'ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm', 'trainer'));
+router.use(authorize('super_admin', 'college_admin', 'ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm', 'trainer', 'placement'));
 
 router.get('/', getNotifications);
 router.put('/:id/read', markAsRead);

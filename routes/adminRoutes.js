@@ -32,7 +32,7 @@ router.get('/courses/:id/syllabus', downloadCourseSyllabus);
 // All routes require protection
 router.use(protect);
 
-const ALL_ADMINS = ['super_admin', 'ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm', 'college_admin'];
+const ALL_ADMINS = ['super_admin', 'ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm', 'college_admin', 'placement'];
 
 router.get('/dashboard-stats', authorize(...ALL_ADMINS), getDashboardStats);
 

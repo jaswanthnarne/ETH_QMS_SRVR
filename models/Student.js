@@ -25,6 +25,14 @@ const studentSchema = new mongoose.Schema({
     semester: String,
     department: String,
     division: String,
+    cgpa: {
+        type: Number,
+        default: 0.0
+    },
+    backlogs: {
+        type: Number,
+        default: 0
+    },
     status: {
         type: String,
         enum: ['active', 'dropped'],

@@ -51,6 +51,7 @@ app.use(cors({
         const isAllowed = allowedOrigins.includes(origin) || 
                           origin.startsWith('http://localhost') || 
                           origin.startsWith('https://localhost') ||
+                          origin.startsWith('http://127.0.0.1') ||
                           origin.endsWith('jaswanthnarne.online') ||
                           origin.endsWith('vercel.app');
         if (isAllowed) {
@@ -324,6 +325,7 @@ app.use('/api/audit', require('./routes/auditRoutes'));
 app.use('/api/question-bank', require('./routes/questionBankRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/attendance', require('./routes/attendanceRoutes'));
+app.use('/api/placement', require('./routes/placementRoutes'));
 
 app.get('/', (req, res) => {
     res.send('QMS API is running...');

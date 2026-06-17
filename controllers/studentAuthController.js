@@ -82,6 +82,8 @@ exports.loginStudent = async (req, res) => {
             capabilities: student.capabilities || '',
             jobPreferences: student.jobPreferences || {},
             resumeUrl: student.resumeUrl || '',
+            cgpa: student.cgpa || 0,
+            backlogs: student.backlogs || 0,
             token: generateToken(student._id)
         });
     } catch (error) {
@@ -167,7 +169,7 @@ exports.changeStudentPassword = async (req, res) => {
 // @access  Private (Student)
 exports.updateStudentProfile = async (req, res) => {
     try {
-        const { skills, capabilities, jobPreferences, name, email, mobile } = req.body;
+        const { skills, capabilities, jobPreferences, name, email, mobile, cgpa, backlogs } = req.body;
         const student = await Student.findById(req.student._id);
 
         if (!student) {
@@ -180,6 +182,8 @@ exports.updateStudentProfile = async (req, res) => {
         if (skills !== undefined) student.skills = Array.isArray(skills) ? skills : skills.split(',').map(s => s.trim()).filter(Boolean);
         if (capabilities !== undefined) student.capabilities = capabilities;
         if (jobPreferences !== undefined) student.jobPreferences = jobPreferences;
+        if (cgpa !== undefined) student.cgpa = parseFloat(cgpa || 0);
+        if (backlogs !== undefined) student.backlogs = parseInt(backlogs || 0);
 
         await student.save();
 
@@ -192,7 +196,9 @@ exports.updateStudentProfile = async (req, res) => {
                 mobile: student.mobile,
                 skills: student.skills,
                 capabilities: student.capabilities,
-                jobPreferences: student.jobPreferences
+                jobPreferences: student.jobPreferences,
+                cgpa: student.cgpa,
+                backlogs: student.backlogs
             }
         });
     } catch (error) {

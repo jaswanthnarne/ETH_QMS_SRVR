@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Ethnotech Academy — Role Privileges & Features Guide (v3 — Rebuilt)
+// Ethnotech Academy — Role Privileges & Features Guide (v4 — Placements Updated)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const C = {
@@ -116,7 +116,7 @@ doc.fillColor(C.white).opacity(0.7)
    .text('feature permissions, and comparative privilege analysis.', M, 315);
 doc.opacity(1);
 
-// Role shortcodes row
+// Role shortcodes row (Updated for 9 roles including PO)
 const codes = [
     { code: 'SA', label: 'Super Admin' },
     { code: 'OA', label: 'Ops Admin' },
@@ -124,20 +124,21 @@ const codes = [
     { code: 'RM', label: 'Regional Mgr' },
     { code: 'ARM', label: 'Asst RM' },
     { code: 'CA', label: 'College Admin' },
+    { code: 'PO', label: 'Placement Off.' },
     { code: 'TR', label: 'Trainer' },
     { code: 'ST', label: 'Student' },
 ];
 
 const codeY = 380;
 codes.forEach((c, i) => {
-    const cx = M + i * 58;
-    doc.roundedRect(cx, codeY, 50, 40, 5).fill('#FFFFFF15');
+    const cx = M + i * 52;
+    doc.roundedRect(cx, codeY, 46, 40, 5).fill('#FFFFFF15');
     doc.fillColor(C.white)
-       .fontSize(11).font('Helvetica-Bold')
-       .text(c.code, cx, codeY + 6, { width: 50, align: 'center' });
+       .fontSize(10).font('Helvetica-Bold')
+       .text(c.code, cx, codeY + 6, { width: 46, align: 'center' });
     doc.fillColor(C.white).opacity(0.45)
        .fontSize(5.5).font('Helvetica')
-       .text(c.label, cx, codeY + 24, { width: 50, align: 'center' });
+       .text(c.label, cx, codeY + 24, { width: 46, align: 'center' });
     doc.opacity(1);
 });
 
@@ -154,9 +155,9 @@ doc.moveTo(M + 16, metaY + 28).lineTo(M + CW - 16, metaY + 28).lineWidth(0.4).st
 
 const metaRows = [
     ['Document Type', 'Internal Administrative Reference'],
-    ['Version', '3.0 — June 2026'],
+    ['Version', '4.0 — June 2026'],
     ['Classification', 'Confidential — Internal Use Only'],
-    ['Roles Covered', '8 roles (Super Admin through Student)'],
+    ['Roles Covered', '9 roles (Super Admin through Student)'],
     ['Sections', 'Role Profiles, Comparison Matrix, Scope Hierarchy'],
     ['Maintained By', 'Ethnotech Academy Platform Team'],
 ];
@@ -197,10 +198,10 @@ const toc = [
     { n: '01', t: 'Cover Page', d: 'Document identity, classification and role summary', p: '1' },
     { n: '02', t: 'Table of Contents', d: 'Section index and navigation', p: '2' },
     { n: '03', t: 'Executive Summary', d: 'RBAC architecture overview and scope model', p: '3' },
-    { n: '04', t: 'Role Profiles', d: 'Detailed feature cards for all 8 platform roles', p: '4-7' },
-    { n: '05', t: 'Comparative Permissions Matrix', d: 'Side-by-side feature access grid across roles', p: '8' },
-    { n: '06', t: 'Scope Hierarchy Diagram', d: 'Visual representation of access boundaries', p: '9' },
-    { n: '07', t: 'Closing & Contact', d: 'Support information and confidentiality notice', p: '10' },
+    { n: '04', t: 'Role Profiles', d: 'Detailed feature cards for all 9 platform roles', p: '4-8' },
+    { n: '05', t: 'Comparative Permissions Matrix', d: 'Side-by-side feature access grid across roles', p: '9' },
+    { n: '06', t: 'Scope Hierarchy Diagram', d: 'Visual representation of access boundaries', p: '10' },
+    { n: '07', t: 'Closing & Contact', d: 'Support information and confidentiality notice', p: '11' },
 ];
 
 toc.forEach(e => {
@@ -252,7 +253,7 @@ doc.fillColor(C.navy).fontSize(12).font('Helvetica-Bold')
    .text('Role-Based Access Control (RBAC)', M + 14, cy + 10);
 doc.fillColor(C.slate700).fontSize(8).font('Helvetica')
    .text(
-       'The Ethnotech Academy platform implements a hierarchical RBAC model with 8 distinct roles. Each role is assigned a specific scope that determines the data boundaries and actions available. Scopes range from Global (full system access) to Regional (assigned colleges) to Institutional (single college) to Classroom (trainer batches) to Portal-Only (student testing interface). All restrictions are enforced at both the API routing layer (server-side middleware) and the frontend UI layer (conditional rendering and navigation protection).',
+       'The Ethnotech Academy platform implements a hierarchical RBAC model with 9 distinct roles. Each role is assigned a specific scope that determines the data boundaries and actions available. Scopes range from Global (full system access) to Regional (assigned colleges) to Institutional (single college / placement office) to Classroom (trainer batches) to Portal-Only (student testing interface). All restrictions are enforced at both the API routing layer (server-side middleware) and the frontend UI layer (conditional rendering and navigation protection).',
        M + 14, cy + 28, { width: CW - 28, lineGap: 2 }
    );
 
@@ -266,7 +267,7 @@ doc.moveDown(0.5);
 const tiers = [
     { tier: 'Global',        roles: 'Super Admin, Ops Admin, Asst Ops Admin',  desc: 'Unrestricted access across all institutions, users, and resources.',           bg: '#FEE2E2', tc: '#991B1B' },
     { tier: 'Regional',      roles: 'Regional Manager, Asst Regional Manager', desc: 'Access restricted to a defined list of assigned colleges.',                    bg: C.green100, tc: C.green800 },
-    { tier: 'Institutional', roles: 'College Admin',                            desc: 'Complete authority within a single college. No cross-institution visibility.', bg: '#DBEAFE', tc: C.blue800 },
+    { tier: 'Institutional', roles: 'College Admin, Placement Officer',         desc: 'Authority within a single college. No cross-institution visibility.',         bg: '#DBEAFE', tc: C.blue800 },
     { tier: 'Classroom',     roles: 'Trainer',                                  desc: 'Limited to mapped batches and courses. Can create exams and proctor.',         bg: C.amber100, tc: C.amber800 },
     { tier: 'Portal',        roles: 'Student',                                  desc: 'Student-facing assessment portal. Take exams and view personal data only.',    bg: C.slate100, tc: C.slate800 },
 ];
@@ -304,7 +305,7 @@ doc.fillColor(C.amber800).fontSize(7.5).font('Helvetica')
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  PAGES 4-7 — ROLE PROFILES (dynamic height, 2 per page when they fit)
+//  PAGES 4-8 — ROLE PROFILES (dynamic height, 2 per page when they fit)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const roles = [
@@ -379,6 +380,18 @@ const roles = [
         restrictions: 'Cannot view other colleges, modify global course materials, or create admin-level accounts.',
     },
     {
+        role: 'Placement Officer', code: 'PO', scope: 'Single Institution Recruiter',
+        accent: '#4F46E5',
+        desc: 'Manages campus hiring drives and student job placements for a specific college context. Configures targeted drives, filters candidates, and exports rosters.',
+        features: [
+            ['Job Opportunities', 'Post, update, and search active job listings. Attach external Google Forms for specialized candidate pre-screening responses.'],
+            ['Roster Management', 'Examine student batches, USNs, and details. Export customized candidate rosters filterable by CGPA and active backlog counts to Excel sheets.'],
+            ['Pipeline Management', 'Move applicants through status pipelines (Applied, Screening Passed/Failed, Shortlisted, Sent to Company, Rejected) in bulk.'],
+            ['Result Analytics', 'Monitor student evaluation scores and assessment performance indicators to evaluate batch readiness.']
+        ],
+        restrictions: 'Cannot edit core college details, modify database course syllabus structures, or create global assessments.'
+    },
+    {
         role: 'Trainer', code: 'TR', scope: 'Classroom Scoped Operator',
         accent: '#D97706',
         desc: 'Handles classroom delivery, live exam proctoring, student evaluation, and attendance marking for mapped batches and courses.',
@@ -396,8 +409,8 @@ const roles = [
         desc: 'End-user assessment portal. Students access assigned examinations, view performance history, check attendance records, and manage personal tasks.',
         features: [
             ['Assessment Portal', 'Enter active access keys to take timed, proctored exams. Submit assessments with auto-save and integrity monitoring.'],
-            ['Performance History', 'View chronological test results with scores and grading details. Review question-level performance and correct answers (if enabled).'],
-            ['Attendance', 'Check personal attendance percentages and session history. View batch attendance details and session topics.'],
+            ['Campus Jobs', 'View eligible job postings, check eligibility parameters (CGPA/backlogs), fill out embedded recruiter Google Forms directly inside the portal, and apply.'],
+            ['Performance & Attendance', 'View chronological test results, certificate downloads, personal attendance percentages, and batch logs.'],
             ['Personal Mgmt', 'Manage to-do lists and task tracking. Update profile and account security settings (password change).'],
         ],
         restrictions: 'Has no access to administrative dashboards, trainer logs, course creation forms, or any management interfaces.',
@@ -473,8 +486,6 @@ function drawRoleCard(role) {
 
     // Redraw card border with actual height
     const actualH = fy - startY;
-    // Overdraw bg (clear the initial estimated one)
-    // Actually let's just set doc.y to the bottom
     doc.y = fy;
 
     return fy;
@@ -487,7 +498,7 @@ doc.y = 55;
 doc.fillColor(C.slate800).fontSize(22).font('Helvetica-Bold').text('Role Profiles', M);
 doc.moveDown(0.2);
 doc.fillColor(C.slate500).fontSize(8.5).font('Helvetica')
-   .text('Detailed feature documentation for each of the 8 platform roles.', M, doc.y, { width: CW });
+   .text('Detailed feature documentation for each of the 9 platform roles.', M, doc.y, { width: CW });
 doc.moveDown(0.6);
 doc.moveTo(M, doc.y).lineTo(M + CW, doc.y).lineWidth(0.5).stroke(C.slate200);
 doc.moveDown(0.6);
@@ -511,7 +522,7 @@ roles.forEach((role, idx) => {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  COMPARISON MATRIX — using drawn shapes instead of Unicode
+//  COMPARISON MATRIX (Updated for 9 roles with PO)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 doc.addPage();
@@ -521,41 +532,44 @@ doc.fillColor(C.slate800).fontSize(22).font('Helvetica-Bold')
    .text('Comparative Permissions Matrix', M);
 doc.moveDown(0.2);
 doc.fillColor(C.slate500).fontSize(8.5).font('Helvetica')
-   .text('Side-by-side comparison of feature access across all 8 platform roles.', M, doc.y, { width: CW });
+   .text('Side-by-side comparison of feature access across all 9 platform roles.', M, doc.y, { width: CW });
 doc.moveDown(0.6);
 doc.moveTo(M, doc.y).lineTo(M + CW, doc.y).lineWidth(0.5).stroke(C.slate200);
 doc.moveDown(0.6);
 
 const matrix = [
-    { feature: 'Create Colleges',           perm: [1,0,0,0,0,0,0,0] },
-    { feature: 'Edit College Profile',      perm: [1,1,1,1,1,1,0,0] },
-    { feature: 'Delete Colleges',           perm: [1,1,0,0,0,0,0,0] },
-    { feature: 'Create Admin Users',        perm: [1,1,0,0,0,0,0,0] },
-    { feature: 'Manage Trainers',           perm: [1,1,1,1,1,1,0,0] },
-    { feature: 'Create Courses',            perm: [1,1,1,1,1,1,0,0] },
-    { feature: 'Delete Courses',            perm: [1,1,0,0,0,0,0,0] },
-    { feature: 'Manage Batches',            perm: [1,1,1,1,1,1,0,0] },
-    { feature: 'Create Exams',              perm: [1,1,1,1,1,1,1,0] },
-    { feature: 'Delete Exams',              perm: [1,1,0,0,0,0,0,0] },
-    { feature: 'Clone Exams',               perm: [1,1,1,1,1,1,1,0] },
-    { feature: 'Manage Question Banks',     perm: [1,1,1,1,1,1,1,0] },
-    { feature: 'Allot Exams (Access Keys)', perm: [1,1,1,1,1,1,0,0] },
-    { feature: 'Live Exam Proctoring',      perm: [1,1,1,1,1,1,1,0] },
-    { feature: 'Mark Attendance',           perm: [0,0,0,0,0,0,1,0] },
-    { feature: 'View Attendance Reports',   perm: [1,1,1,1,1,1,1,1] },
-    { feature: 'Submit Training Logs',      perm: [0,0,0,0,0,0,1,0] },
-    { feature: 'View Training Logs',        perm: [1,1,1,1,1,1,1,0] },
-    { feature: 'Export Reports (Excel)',     perm: [1,1,1,1,1,1,1,0] },
-    { feature: 'View Analytics Dashboard',  perm: [1,1,1,1,1,1,1,0] },
-    { feature: 'View Audit Trail',          perm: [1,1,1,1,1,1,0,0] },
-    { feature: 'System Notifications',      perm: [1,0,0,0,0,1,0,0] },
-    { feature: 'Take Exams',               perm: [0,0,0,0,0,0,0,1] },
-    { feature: 'Personal To-Do List',       perm: [0,0,0,0,0,0,0,1] },
+    { feature: 'Create Colleges',           perm: [1,0,0,0,0,0,0,0,0] },
+    { feature: 'Edit College Profile',      perm: [1,1,1,1,1,1,1,0,0] },
+    { feature: 'Delete Colleges',           perm: [1,1,0,0,0,0,0,0,0] },
+    { feature: 'Create Admin Users',        perm: [1,1,0,0,0,0,0,0,0] },
+    { feature: 'Manage Trainers',           perm: [1,1,1,1,1,1,0,0,0] },
+    { feature: 'Create Courses',            perm: [1,1,1,1,1,1,0,0,0] },
+    { feature: 'Delete Courses',            perm: [1,1,0,0,0,0,0,0,0] },
+    { feature: 'Manage Batches',            perm: [1,1,1,1,1,1,0,0,0] },
+    { feature: 'Create Exams',              perm: [1,1,1,1,1,1,0,1,0] },
+    { feature: 'Delete Exams',              perm: [1,1,0,0,0,0,0,0,0] },
+    { feature: 'Clone Exams',               perm: [1,1,1,1,1,1,0,1,0] },
+    { feature: 'Manage Question Banks',     perm: [1,1,1,1,1,1,0,1,0] },
+    { feature: 'Allot Exams (Access Keys)', perm: [1,1,1,1,1,1,0,0,0] },
+    { feature: 'Live Exam Proctoring',      perm: [1,1,1,1,1,1,0,1,0] },
+    { feature: 'Mark Attendance',           perm: [0,0,0,0,0,0,0,1,0] },
+    { feature: 'View Attendance Reports',   perm: [1,1,1,1,1,1,0,1,1] },
+    { feature: 'Submit Training Logs',      perm: [0,0,0,0,0,0,0,1,0] },
+    { feature: 'View Training Logs',        perm: [1,1,1,1,1,1,0,1,0] },
+    { feature: 'Post Campus Jobs',          perm: [1,1,0,1,0,1,1,0,0] },
+    { feature: 'Manage Job Applicants',     perm: [1,1,0,1,0,1,1,0,0] },
+    { feature: 'Apply for Jobs (G-Form)',   perm: [0,0,0,0,0,0,0,0,1] },
+    { feature: 'Export Reports (Excel)',     perm: [1,1,1,1,1,1,1,1,0] },
+    { feature: 'View Analytics Dashboard',  perm: [1,1,1,1,1,1,1,1,0] },
+    { feature: 'View Audit Trail',          perm: [1,1,1,1,1,1,0,0,0] },
+    { feature: 'System Notifications',      perm: [1,0,0,0,0,1,1,0,0] },
+    { feature: 'Take Exams',               perm: [0,0,0,0,0,0,0,0,1] },
+    { feature: 'Personal To-Do List',       perm: [0,0,0,0,0,0,0,0,1] },
 ];
 
-const colHeaders = ['SA','OA','AOA','RM','ARM','CA','TR','ST'];
-const featureColW = 152;
-const permColW = (CW - featureColW) / 8;
+const colHeaders = ['SA','OA','AOA','RM','ARM','CA','PO','TR','ST'];
+const featureColW = 142;
+const permColW = (CW - featureColW) / 9;
 const rowH = 20;
 
 // Table header
@@ -605,9 +619,7 @@ matrix.forEach((row, idx) => {
         const cyDot = ty + rowH / 2;
 
         if (p === 1) {
-            // Green filled circle = granted
             drawDot(cx, cyDot, 4.5, C.green600);
-            // White checkmark line drawn manually
             doc.save();
             doc.lineWidth(1.2).strokeColor(C.white);
             doc.moveTo(cx - 2.2, cyDot + 0.2)
@@ -616,7 +628,6 @@ matrix.forEach((row, idx) => {
                .stroke();
             doc.restore();
         } else {
-            // Light gray circle with dash = denied
             drawDot(cx, cyDot, 4.5, C.slate200);
             doc.save();
             doc.lineWidth(1.2).strokeColor(C.slate400);
@@ -644,7 +655,7 @@ drawDot(M + 155, ty + 9, 4, C.slate200);
 doc.fillColor(C.slate600).fontSize(7).font('Helvetica').text('Access Denied', M + 165, ty + 5);
 
 doc.fillColor(C.slate400).fontSize(6.5).font('Helvetica')
-   .text('SA = Super Admin  |  OA = Ops Admin  |  AOA = Asst Ops Admin  |  RM = Regional Manager  |  ARM = Asst RM  |  CA = College Admin  |  TR = Trainer  |  ST = Student', M + 10, ty + 18, { width: CW - 20 });
+   .text('SA = Super Admin  |  OA = Ops Admin  |  AOA = Asst Ops Admin  |  RM = Regional Manager  |  ARM = Asst RM  |  CA = College Admin  |  PO = Placement Off.  |  TR = Trainer  |  ST = Student', M + 10, ty + 18, { width: CW - 20 });
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -668,7 +679,7 @@ const baseHierY = doc.y;
 const hierLayers = [
     { label: 'GLOBAL SCOPE',        sub: 'Super Admin  /  Ops Admin  /  Asst Ops Admin',   w: 420, h: 330, bg: '#FEE2E2', border: '#FECACA', tc: '#991B1B' },
     { label: 'REGIONAL SCOPE',      sub: 'Regional Manager  /  Asst Regional Manager',     w: 340, h: 256, bg: C.green100, border: '#A7F3D0', tc: C.green800 },
-    { label: 'INSTITUTIONAL SCOPE', sub: 'College Admin',                                   w: 260, h: 182, bg: '#DBEAFE', border: '#BFDBFE', tc: C.blue800 },
+    { label: 'INSTITUTIONAL SCOPE', sub: 'College Admin  /  Placement Officer',             w: 260, h: 182, bg: '#DBEAFE', border: '#BFDBFE', tc: C.blue800 },
     { label: 'CLASSROOM SCOPE',     sub: 'Trainer',                                         w: 180, h: 108, bg: C.amber100, border: '#FDE68A', tc: C.amber800 },
     { label: 'PORTAL',              sub: 'Student',                                         w: 110, h:  46, bg: C.slate100, border: C.slate300, tc: C.slate800 },
 ];
@@ -733,7 +744,7 @@ doc.fillColor(C.white).opacity(0.7)
 doc.opacity(1);
 doc.fillColor(C.white).opacity(0.5)
    .fontSize(7).font('Helvetica')
-   .text('Platform v3.0  |  Document Rev. June 2026', M + 80, 430, { width: CW - 160, align: 'center' });
+   .text('Platform v4.0  |  Document Rev. June 2026', M + 80, 430, { width: CW - 160, align: 'center' });
 doc.opacity(1);
 
 // Confidentiality

@@ -105,6 +105,8 @@ exports.importStudents = async (req, res) => {
             const semester = row.getCell(5).value?.toString()?.trim();
             const department = row.getCell(6).value?.toString()?.trim();
             const division = row.getCell(7).value?.toString()?.trim();
+            const cgpa = parseFloat(row.getCell(8).value?.toString()?.trim() || '0');
+            const backlogs = parseInt(row.getCell(9).value?.toString()?.trim() || '0');
 
             if (!name) {
                 results.errors.push({ row: rowNumber, error: 'Student name is required' });
@@ -115,7 +117,7 @@ exports.importStudents = async (req, res) => {
                 return;
             }
 
-            rows.push({ name, usn, mobile, email, semester, department, division, rowNumber });
+            rows.push({ name, usn, mobile, email, semester, department, division, cgpa, backlogs, rowNumber });
         });
 
         // Process each row
@@ -145,7 +147,9 @@ exports.importStudents = async (req, res) => {
                         email: row.email,
                         semester: row.semester,
                         department: row.department,
-                        division: row.division
+                        division: row.division,
+                        cgpa: row.cgpa || 0,
+                        backlogs: row.backlogs || 0
                     });
                     results.created++;
                 }
@@ -221,6 +225,8 @@ exports.parseStudentsExcel = async (req, res) => {
             const semester = row.getCell(5).value?.toString()?.trim() || '';
             const department = row.getCell(6).value?.toString()?.trim() || '';
             const division = row.getCell(7).value?.toString()?.trim() || '';
+            const cgpa = parseFloat(row.getCell(8).value?.toString()?.trim() || '0');
+            const backlogs = parseInt(row.getCell(9).value?.toString()?.trim() || '0');
 
             if (usn) {
                 if (usns.has(usn)) {
@@ -237,6 +243,8 @@ exports.parseStudentsExcel = async (req, res) => {
                 semester,
                 department,
                 division,
+                cgpa,
+                backlogs,
                 rowNumber
             });
         });
@@ -281,6 +289,8 @@ exports.parseStudentsExcel = async (req, res) => {
                 semester: row.semester,
                 department: row.department,
                 division: row.division,
+                cgpa: row.cgpa || 0,
+                backlogs: row.backlogs || 0,
                 error,
                 originalUsn: row.usn,
                 originalError
@@ -352,7 +362,9 @@ exports.importStudentsList = async (req, res) => {
                     email: stud.email ? stud.email.trim() : undefined,
                     semester: stud.semester ? stud.semester.toString().trim() : undefined,
                     department: stud.department ? stud.department.trim() : undefined,
-                    division: stud.division ? stud.division.trim() : undefined
+                    division: stud.division ? stud.division.trim() : undefined,
+                    cgpa: parseFloat(stud.cgpa || 0),
+                    backlogs: parseInt(stud.backlogs || 0)
                 });
 
                 results.created++;
@@ -396,7 +408,9 @@ exports.downloadTemplate = async (req, res) => {
             { header: 'Email', key: 'email', width: 28 },
             { header: 'Semester', key: 'semester', width: 12 },
             { header: 'Department', key: 'department', width: 20 },
-            { header: 'Division', key: 'division', width: 10 }
+            { header: 'Division', key: 'division', width: 10 },
+            { header: 'CGPA', key: 'cgpa', width: 10 },
+            { header: 'Backlogs', key: 'backlogs', width: 10 }
         ];
 
         // Style header row
@@ -411,11 +425,13 @@ exports.downloadTemplate = async (req, res) => {
         // Add 2 sample rows
         sheet.addRow({
             name: 'Akhil Sharma', usn: '1CIT22CS001', mobile: '9876543210',
-            email: 'akhil@gmail.com', semester: '6', department: 'CSE', division: 'A'
+            email: 'akhil@gmail.com', semester: '6', department: 'CSE', division: 'A',
+            cgpa: '8.5', backlogs: '0'
         });
         sheet.addRow({
             name: 'Neha Gupta', usn: '1CIT22CS002', mobile: '9876543211',
-            email: 'neha@gmail.com', semester: '6', department: 'CSE', division: 'B'
+            email: 'neha@gmail.com', semester: '6', department: 'CSE', division: 'B',
+            cgpa: '7.8', backlogs: '1'
         });
 
         const buffer = await workbook.xlsx.writeBuffer();
@@ -454,7 +470,7 @@ exports.updateStudent = async (req, res) => {
             }
         }
 
-        const { name, usn, mobile, email, semester, department, division, status } = req.body;
+        const { name, usn, mobile, email, semester, department, division, status, cgpa, backlogs } = req.body;
 
         if (name) student.name = name;
         if (usn) student.usn = usn;
@@ -464,6 +480,8 @@ exports.updateStudent = async (req, res) => {
         if (department !== undefined) student.department = department;
         if (division !== undefined) student.division = division;
         if (status) student.status = status;
+        if (cgpa !== undefined) student.cgpa = cgpa;
+        if (backlogs !== undefined) student.backlogs = backlogs;
 
         await student.save();
 
@@ -522,7 +540,7 @@ exports.createStudent = async (req, res) => {
             }
         }
 
-        const { name, usn, mobile, email, semester, department, division } = req.body;
+        const { name, usn, mobile, email, semester, department, division, cgpa, backlogs } = req.body;
 
         if (!name || !usn) {
             return res.status(400).json({ success: false, error: 'Name and USN are required' });
@@ -543,7 +561,9 @@ exports.createStudent = async (req, res) => {
             email,
             semester,
             department,
-            division
+            division,
+            cgpa: cgpa || 0,
+            backlogs: backlogs || 0
         });
 
         // Update student count
