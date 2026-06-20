@@ -6,7 +6,7 @@ const {
     getCourses, createCourse, updateCourse, deleteCourse, uploadCourseSyllabus, downloadCourseSyllabus,
     getTrainers, createTrainer, updateTrainer, deleteTrainer, uploadTrainerPdf, downloadTrainerPdf,
     createExam, getExams, getExamById, updateExam, publishExam, unpublishExam, parseDocument, getAllotments, deleteExam,
-    getDashboardStats, bulkImportQuestions, cloneExam, getAdminTrainingLogs,
+    getDashboardStats, bulkImportQuestions, parseQuestionsExcel, cloneExam, getAdminTrainingLogs,
     getAdminUsers, createAdminUser, updateAdminUser, deleteAdminUser
 } = require('../controllers/adminController');
 const { getBatches, getBatchById, createBatchAdmin, getBatchesByCourse, updateBatch, deleteBatch } = require('../controllers/batchController');
@@ -28,6 +28,14 @@ const upload = multer({
 // Public download route for trainer details PDF (opened in new tab)
 router.get('/trainers/:id/pdf', downloadTrainerPdf);
 router.get('/courses/:id/syllabus', downloadCourseSyllabus);
+
+// Template download (no auth required — it's just a static file pointer)
+router.get('/exams/bulk-import/template', (req, res) => {
+    const templatePath = path.join(__dirname, '..', 'bulk_import_template.xlsx');
+    res.download(templatePath, 'bulk_import_template.xlsx', (err) => {
+        if (err) res.status(404).json({ success: false, error: 'Template file not found' });
+    });
+});
 
 // All routes require protection
 router.use(protect);
@@ -79,12 +87,12 @@ router.delete('/batches/:id', authorize('super_admin', 'ops_admin'), deleteBatch
 // ERP ROUTES — Students (Batch scoped)
 router.get('/batches/:batchId/students', authorize(...ALL_ADMINS, 'trainer'), getStudentsByBatch);
 router.post('/batches/:batchId/students', authorize(...ALL_ADMINS, 'trainer'), createStudent);
-router.post('/batches/:batchId/students/parse', authorize(...ALL_ADMINS), upload.single('file'), parseStudentsExcel);
-router.post('/batches/:batchId/students/import-list', authorize(...ALL_ADMINS), importStudentsList);
-router.post('/batches/:batchId/students/import', authorize(...ALL_ADMINS), upload.single('file'), importStudents);
-router.get('/batches/:batchId/students/template', authorize(...ALL_ADMINS), downloadTemplate);
+router.post('/batches/:batchId/students/parse', authorize(...ALL_ADMINS, 'trainer'), upload.single('file'), parseStudentsExcel);
+router.post('/batches/:batchId/students/import-list', authorize(...ALL_ADMINS, 'trainer'), importStudentsList);
+router.post('/batches/:batchId/students/import', authorize(...ALL_ADMINS, 'trainer'), upload.single('file'), importStudents);
+router.get('/batches/:batchId/students/template', authorize(...ALL_ADMINS, 'trainer'), downloadTemplate);
 router.put('/batches/:batchId/students/:studentId', authorize(...ALL_ADMINS, 'trainer'), updateStudent);
-router.delete('/batches/:batchId/students/:studentId', authorize('super_admin', 'ops_admin'), deleteStudent);
+router.delete('/batches/:batchId/students/:studentId', authorize(...ALL_ADMINS, 'trainer'), deleteStudent);
 router.get('/colleges/:collegeId/students', authorize(...ALL_ADMINS), getStudentsByCollege);
 
 // Trainers (Admin only)
@@ -104,16 +112,11 @@ router.post('/exams/:id/unpublish', authorize(...ALL_ADMINS, 'trainer'), unpubli
 router.post('/exams/:id/clone', authorize(...ALL_ADMINS, 'trainer'), cloneExam);
 router.post('/exams/parse-document', authorize(...ALL_ADMINS, 'trainer'), upload.single('document'), parseDocument);
 router.post('/exams/bulk-import', authorize(...ALL_ADMINS, 'trainer'), upload.single('file'), bulkImportQuestions);
+router.post('/exams/bulk-import/parse', authorize(...ALL_ADMINS, 'trainer'), upload.single('file'), parseQuestionsExcel);
 router.get('/allotments', authorize(...ALL_ADMINS, 'trainer'), getAllotments);
-router.delete('/exams/:id', authorize('super_admin', 'ops_admin'), deleteExam);
+router.delete('/exams/:id', authorize(...ALL_ADMINS, 'trainer'), deleteExam);
 
-// Template download (no auth required — it's just a static file pointer)
-router.get('/exams/bulk-import/template', (req, res) => {
-    const templatePath = path.join(__dirname, '..', 'bulk_import_template.xlsx');
-    res.download(templatePath, 'bulk_import_template.xlsx', (err) => {
-        if (err) res.status(404).json({ success: false, error: 'Template file not found' });
-    });
-});
+
 
 // Certificate download (admin can pull cert for any student attempt)
 const { generateCertificate } = require('../utils/certificateGenerator');

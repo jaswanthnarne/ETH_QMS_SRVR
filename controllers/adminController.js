@@ -1089,17 +1089,19 @@ exports.bulkImportQuestions = async (req, res) => {
         const exam = await Exam.findById(examId);
         if (!exam) return res.status(404).json({ success: false, error: 'Exam not found' });
 
+        const ExcelJS = require('exceljs');
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.load(req.file.buffer);
         const sheet = workbook.worksheets[0];
 
         const questions = [];
         const errors = [];
-        let rowIndex = 0;
+        const existingQuestionCount = await Question.countDocuments({ examId });
+        let questionOrder = existingQuestionCount + 1;
 
         sheet.eachRow((row, rowNumber) => {
             if (rowNumber === 1) return; // skip header
-            rowIndex++;
+
             const text = row.getCell(1).value?.toString()?.trim();
             const type = row.getCell(2).value?.toString()?.trim()?.toLowerCase() || 'single_correct';
             const optA = row.getCell(3).value?.toString()?.trim();
@@ -1110,26 +1112,106 @@ exports.bulkImportQuestions = async (req, res) => {
             const marks = parseFloat(row.getCell(8).value) || 1;
             const difficulty = row.getCell(9).value?.toString()?.trim()?.toLowerCase() || 'medium';
 
-            if (!text) { errors.push({ row: rowNumber, error: 'Question text is required' }); return; }
-            if (!correctAnswer) { errors.push({ row: rowNumber, error: 'Correct answer is required' }); return; }
+            // Skip entirely blank trailing rows silently
+            if (!text && !correctAnswer && !optA && !optB) {
+                return;
+            }
+
+            if (!text) {
+                errors.push({ row: rowNumber, error: 'Question text is missing' });
+                return;
+            }
+            if (!correctAnswer) {
+                errors.push({ row: rowNumber, error: 'Correct answer is missing' });
+                return;
+            }
 
             const allOptions = [optA, optB, optC, optD].filter(Boolean);
-
             let choices = [];
             let correctAnswerText = null;
-            const normalizedType = ['single_correct','mcq'].includes(type) ? 'single_correct'
+
+            const normalizedType = ['single_correct','mcq', 'single'].includes(type) ? 'single_correct'
                 : ['multiple_correct','multiple'].includes(type) ? 'multiple_correct'
-                : ['true_false'].includes(type) ? 'true_false'
-                : ['fill_blank','fill_blanks'].includes(type) ? 'fill_blank'
-                : ['numeric'].includes(type) ? 'numeric'
+                : ['true_false', 'tf', 'true/false'].includes(type) ? 'true_false'
+                : ['fill_blank','fill_blanks', 'fib'].includes(type) ? 'fill_blank'
+                : ['numeric', 'number'].includes(type) ? 'numeric'
                 : 'single_correct';
 
-            if (normalizedType === 'single_correct' || normalizedType === 'true_false') {
-                const opts = normalizedType === 'true_false' ? ['True', 'False'] : allOptions;
-                choices = opts.map((opt, i) => ({ id: `opt_${i}`, text: opt, isCorrect: opt.toLowerCase() === correctAnswer.toLowerCase() }));
-            } else if (normalizedType === 'multiple_correct') {
-                const correctArr = correctAnswer.split(',').map(s => s.trim().toLowerCase());
-                choices = allOptions.map((opt, i) => ({ id: `opt_${i}`, text: opt, isCorrect: correctArr.includes(opt.toLowerCase()) }));
+            if (normalizedType === 'single_correct' || normalizedType === 'multiple_correct') {
+                if (allOptions.length < 2) {
+                    errors.push({ row: rowNumber, error: 'MCQ questions require at least 2 options' });
+                    return;
+                }
+                
+                if (normalizedType === 'single_correct') {
+                    let correctAnswerIndex = -1;
+                    const normAns = correctAnswer.trim().toUpperCase();
+                    if (normAns === 'A' || normAns === 'OPTION A') correctAnswerIndex = 0;
+                    else if (normAns === 'B' || normAns === 'OPTION B') correctAnswerIndex = 1;
+                    else if (normAns === 'C' || normAns === 'OPTION C') correctAnswerIndex = 2;
+                    else if (normAns === 'D' || normAns === 'OPTION D') correctAnswerIndex = 3;
+                    else {
+                        correctAnswerIndex = allOptions.findIndex(opt => opt.toLowerCase() === correctAnswer.toLowerCase());
+                    }
+
+                    if (correctAnswerIndex === -1 || correctAnswerIndex >= allOptions.length) {
+                        errors.push({ row: rowNumber, error: `Correct answer "${correctAnswer}" must match one of the provided options or option letters (A-D)` });
+                        return;
+                    }
+                    choices = allOptions.map((opt, i) => ({
+                        id: `opt_${i}`,
+                        text: opt,
+                        isCorrect: i === correctAnswerIndex
+                    }));
+                } else {
+                    // multiple_correct
+                    const correctParts = correctAnswer.split(',').map(s => s.trim().toUpperCase());
+                    const correctIndices = [];
+                    
+                    correctParts.forEach(part => {
+                        let idx = -1;
+                        if (part === 'A' || part === 'OPTION A') idx = 0;
+                        else if (part === 'B' || part === 'OPTION B') idx = 1;
+                        else if (part === 'C' || part === 'OPTION C') idx = 2;
+                        else if (part === 'D' || part === 'OPTION D') idx = 3;
+                        else {
+                            idx = allOptions.findIndex(opt => opt.toLowerCase() === part.toLowerCase());
+                        }
+                        if (idx >= 0 && idx < allOptions.length) {
+                            correctIndices.push(idx);
+                        }
+                    });
+
+                    if (correctIndices.length === 0) {
+                        errors.push({ row: rowNumber, error: `Correct answers "${correctAnswer}" must match at least one option or option letters (A-D)` });
+                        return;
+                    }
+                    choices = allOptions.map((opt, i) => ({
+                        id: `opt_${i}`,
+                        text: opt,
+                        isCorrect: correctIndices.includes(i)
+                    }));
+                }
+            } else if (normalizedType === 'true_false') {
+                let tfAnswer = '';
+                const normTF = correctAnswer.trim().toLowerCase();
+                if (normTF === 'true' || normTF === 't' || normTF === 'a') tfAnswer = 'True';
+                else if (normTF === 'false' || normTF === 'f' || normTF === 'b') tfAnswer = 'False';
+                else {
+                    errors.push({ row: rowNumber, error: `Correct answer "${correctAnswer}" must be 'True' or 'False'` });
+                    return;
+                }
+                choices = [
+                    { id: 'opt_0', text: 'True', isCorrect: tfAnswer === 'True' },
+                    { id: 'opt_1', text: 'False', isCorrect: tfAnswer === 'False' }
+                ];
+            } else if (normalizedType === 'numeric') {
+                const numVal = parseFloat(correctAnswer);
+                if (isNaN(numVal)) {
+                    errors.push({ row: rowNumber, error: `Correct answer "${correctAnswer}" is not a valid number` });
+                    return;
+                }
+                correctAnswerText = numVal.toString();
             } else {
                 correctAnswerText = correctAnswer;
             }
@@ -1139,8 +1221,10 @@ exports.bulkImportQuestions = async (req, res) => {
                 type: normalizedType,
                 text,
                 points: marks,
-                difficulty: ['easy','medium','hard'].includes(difficulty) ? difficulty : 'medium',
-                order: rowIndex,
+                metadata: {
+                    difficulty: ['easy','medium','hard'].includes(difficulty) ? difficulty : 'medium'
+                },
+                order: questionOrder++,
                 correctAnswerText,
                 options: { choices }
             });
@@ -1148,6 +1232,12 @@ exports.bulkImportQuestions = async (req, res) => {
 
         if (questions.length > 0) {
             await Question.insertMany(questions);
+            
+            // Re-calculate and update totalMarks on the Exam
+            const allExamQuestions = await Question.find({ examId });
+            exam.totalMarks = allExamQuestions.reduce((sum, q) => sum + (q.points || 0), 0);
+            await exam.save();
+
             await logAudit(req, 'BULK_IMPORT_QUESTIONS', 'Exam', exam._id, exam.title, { count: questions.length });
         }
 
@@ -1159,6 +1249,160 @@ exports.bulkImportQuestions = async (req, res) => {
         });
     } catch (error) {
         console.error('Bulk import error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// --- Parse Questions Excel without saving ---
+exports.parseQuestionsExcel = async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
+
+        const ExcelJS = require('exceljs');
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(req.file.buffer);
+        const sheet = workbook.worksheets[0];
+
+        const questions = [];
+        const errors = [];
+        let tempId = Date.now();
+
+        sheet.eachRow((row, rowNumber) => {
+            if (rowNumber === 1) return; // skip header
+
+            const text = row.getCell(1).value?.toString()?.trim();
+            const type = row.getCell(2).value?.toString()?.trim()?.toLowerCase() || 'single_correct';
+            const optA = row.getCell(3).value?.toString()?.trim();
+            const optB = row.getCell(4).value?.toString()?.trim();
+            const optC = row.getCell(5).value?.toString()?.trim();
+            const optD = row.getCell(6).value?.toString()?.trim();
+            const correctAnswer = row.getCell(7).value?.toString()?.trim();
+            const marks = parseFloat(row.getCell(8).value) || 5; // Default marks to 5 in frontend
+            const difficulty = row.getCell(9).value?.toString()?.trim()?.toLowerCase() || 'medium';
+
+            // Skip entirely blank trailing rows silently
+            if (!text && !correctAnswer && !optA && !optB) {
+                return;
+            }
+
+            if (!text) {
+                errors.push({ row: rowNumber, error: 'Question text is missing' });
+                return;
+            }
+            if (!correctAnswer) {
+                errors.push({ row: rowNumber, error: 'Correct answer is missing' });
+                return;
+            }
+
+            const allOptions = [optA, optB, optC, optD].filter(Boolean);
+            let choices = [];
+            let correctAnswerText = null;
+
+            const normalizedType = ['single_correct','mcq', 'single'].includes(type) ? 'single_correct'
+                : ['multiple_correct','multiple'].includes(type) ? 'multiple_correct'
+                : ['true_false', 'tf', 'true/false'].includes(type) ? 'true_false'
+                : ['fill_blank','fill_blanks', 'fib'].includes(type) ? 'fill_blank'
+                : ['numeric', 'number'].includes(type) ? 'numeric'
+                : 'single_correct';
+
+            if (normalizedType === 'single_correct' || normalizedType === 'multiple_correct') {
+                if (allOptions.length < 2) {
+                    errors.push({ row: rowNumber, error: 'MCQ questions require at least 2 options' });
+                    return;
+                }
+                
+                if (normalizedType === 'single_correct') {
+                    let correctAnswerIndex = -1;
+                    const normAns = correctAnswer.trim().toUpperCase();
+                    if (normAns === 'A' || normAns === 'OPTION A') correctAnswerIndex = 0;
+                    else if (normAns === 'B' || normAns === 'OPTION B') correctAnswerIndex = 1;
+                    else if (normAns === 'C' || normAns === 'OPTION C') correctAnswerIndex = 2;
+                    else if (normAns === 'D' || normAns === 'OPTION D') correctAnswerIndex = 3;
+                    else {
+                        correctAnswerIndex = allOptions.findIndex(opt => opt.toLowerCase() === correctAnswer.toLowerCase());
+                    }
+
+                    if (correctAnswerIndex === -1 || correctAnswerIndex >= allOptions.length) {
+                        errors.push({ row: rowNumber, error: `Correct answer "${correctAnswer}" must match one of the provided options or option letters (A-D)` });
+                        return;
+                    }
+                    choices = allOptions.map((opt, i) => ({
+                        id: `opt_${i}`,
+                        text: opt,
+                        isCorrect: i === correctAnswerIndex
+                    }));
+                } else {
+                    // multiple_correct
+                    const correctParts = correctAnswer.split(',').map(s => s.trim().toUpperCase());
+                    const correctIndices = [];
+                    
+                    correctParts.forEach(part => {
+                        let idx = -1;
+                        if (part === 'A' || part === 'OPTION A') idx = 0;
+                        else if (part === 'B' || part === 'OPTION B') idx = 1;
+                        else if (part === 'C' || part === 'OPTION C') idx = 2;
+                        else if (part === 'D' || part === 'OPTION D') idx = 3;
+                        else {
+                            idx = allOptions.findIndex(opt => opt.toLowerCase() === part.toLowerCase());
+                        }
+                        if (idx >= 0 && idx < allOptions.length) {
+                            correctIndices.push(idx);
+                        }
+                    });
+
+                    if (correctIndices.length === 0) {
+                        errors.push({ row: rowNumber, error: `Correct answers "${correctAnswer}" must match at least one option or option letters (A-D)` });
+                        return;
+                    }
+                    choices = allOptions.map((opt, i) => ({
+                        id: `opt_${i}`,
+                        text: opt,
+                        isCorrect: correctIndices.includes(i)
+                    }));
+                }
+            } else if (normalizedType === 'true_false') {
+                let tfAnswer = '';
+                const normTF = correctAnswer.trim().toLowerCase();
+                if (normTF === 'true' || normTF === 't' || normTF === 'a') tfAnswer = 'True';
+                else if (normTF === 'false' || normTF === 'f' || normTF === 'b') tfAnswer = 'False';
+                else {
+                    errors.push({ row: rowNumber, error: `Correct answer "${correctAnswer}" must be 'True' or 'False'` });
+                    return;
+                }
+                choices = [
+                    { id: 'opt_0', text: 'True', isCorrect: tfAnswer === 'True' },
+                    { id: 'opt_1', text: 'False', isCorrect: tfAnswer === 'False' }
+                ];
+            } else if (normalizedType === 'numeric') {
+                const numVal = parseFloat(correctAnswer);
+                if (isNaN(numVal)) {
+                    errors.push({ row: rowNumber, error: `Correct answer "${correctAnswer}" is not a valid number` });
+                    return;
+                }
+                correctAnswerText = numVal.toString();
+            } else {
+                correctAnswerText = correctAnswer;
+            }
+
+            questions.push({
+                id: tempId++ + Math.random(),
+                type: normalizedType,
+                text,
+                options: normalizedType === 'true_false' ? ['True', 'False'] : (normalizedType === 'fill_blank' || normalizedType === 'numeric' ? [] : allOptions),
+                correctAnswer: normalizedType === 'multiple_correct' ? '' : (normalizedType === 'single_correct' || normalizedType === 'true_false' ? (choices.find(c => c.isCorrect)?.text || '') : correctAnswerText),
+                correctAnswers: normalizedType === 'multiple_correct' ? choices.filter(c => c.isCorrect).map(c => c.text) : [],
+                marks: marks
+            });
+        });
+
+        res.json({
+            success: true,
+            imported: questions.length,
+            data: questions,
+            errors
+        });
+    } catch (error) {
+        console.error('Bulk parse questions error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };
@@ -1193,7 +1437,7 @@ exports.cloneExam = async (req, res) => {
                 type: q.type,
                 text: q.text,
                 points: q.points,
-                difficulty: q.difficulty,
+                metadata: q.metadata,
                 order: q.order,
                 correctAnswerText: q.correctAnswerText,
                 options: q.options,
