@@ -69,7 +69,10 @@ const examSchema = new mongoose.Schema({
         enableCertificate: { type: Boolean, default: false },
         enableSections: { type: Boolean, default: false },
         randomizeQuestions: { type: Boolean, default: false },
-        randomQuestionCount: { type: Number, default: 0 }
+        randomQuestionCount: { type: Number, default: 0 },
+        requireWebcam: { type: Boolean, default: false },
+        requireMic: { type: Boolean, default: false },
+        requireScreenshare: { type: Boolean, default: false }
     },
     sections: [{
         name: { type: String, required: true },

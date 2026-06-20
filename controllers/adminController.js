@@ -905,7 +905,10 @@ exports.createExam = async (req, res) => {
                 collectMobile: settings?.collectMobile ?? true,
                 collectDepartment: settings?.collectDepartment ?? true,
                 enableCertificate: settings?.enableCertificate ?? false,
-                enableSections: settings?.enableSections ?? false
+                enableSections: settings?.enableSections ?? false,
+                requireWebcam: settings?.requireWebcam ?? false,
+                requireMic: settings?.requireMic ?? false,
+                requireScreenshare: settings?.requireScreenshare ?? false
             },
             createdBy: req.user._id
         });
