@@ -1032,26 +1032,76 @@ exports.updateExam = async (req, res) => {
         await exam.save();
 
         if (payload.questions && Array.isArray(payload.questions)) {
-            await Question.deleteMany({ examId: exam._id });
-            const questionData = payload.questions.map((q, index) => {
+            // Find existing question documents for this exam
+            const existingQuestions = await Question.find({ examId: exam._id });
+            const existingIds = existingQuestions.map(q => q._id.toString());
+            
+            // Collect all question IDs present in the payload
+            const payloadIds = payload.questions
+                .map(q => q._id)
+                .filter(id => id && typeof id === 'string');
+
+            // 1. Delete questions that are not in the payload
+            const idsToDelete = existingIds.filter(id => !payloadIds.includes(id));
+            if (idsToDelete.length > 0) {
+                await Question.deleteMany({ _id: { $in: idsToDelete } });
+            }
+
+            // 2. Insert or update questions
+            for (let index = 0; index < payload.questions.length; index++) {
+                const q = payload.questions[index];
                 const qType = q.type || 'single_correct';
-                let choices = []; let correctAnswerText = null;
+                let choices = [];
+                let correctAnswerText = null;
 
                 if (qType === 'single_correct' || qType === 'mcq') {
-                    choices = (q.options || []).map((opt, i) => ({ id: `opt_${i}`, text: opt, isCorrect: opt === q.correctAnswer }));
+                    choices = (q.options || []).map((opt, i) => ({
+                        id: `opt_${i}`,
+                        text: opt,
+                        isCorrect: opt === q.correctAnswer
+                    }));
                 } else if (qType === 'multiple_correct' || qType === 'multiple') {
-                    const correctArr = Array.isArray(q.correctAnswers) ? q.correctAnswers : JSON.parse(q.correctAnswer || '[]');
-                    choices = (q.options || []).map((opt, i) => ({ id: `opt_${i}`, text: opt, isCorrect: correctArr.includes(opt) }));
+                    let correctArr = [];
+                    try {
+                        correctArr = Array.isArray(q.correctAnswers) ? q.correctAnswers : JSON.parse(q.correctAnswer || '[]');
+                    } catch (e) {
+                        correctArr = [q.correctAnswer];
+                    }
+                    choices = (q.options || []).map((opt, i) => ({
+                        id: `opt_${i}`,
+                        text: opt,
+                        isCorrect: correctArr.includes(opt)
+                    }));
                 } else if (qType === 'true_false') {
-                    choices = ['True', 'False'].map((opt, i) => ({ id: `opt_${i}`, text: opt, isCorrect: opt === q.correctAnswer }));
+                    choices = ['True', 'False'].map((opt, i) => ({
+                        id: `opt_${i}`,
+                        text: opt,
+                        isCorrect: opt === q.correctAnswer
+                    }));
                 } else if (qType === 'fill_blank' || qType === 'fill_blanks') {
                     correctAnswerText = q.correctAnswer?.toString() || '';
                 } else if (qType === 'numeric') {
                     correctAnswerText = q.correctAnswer?.toString() || '';
                 }
-                return { examId: exam._id, type: qType, text: q.text, points: q.marks || 1, order: index, correctAnswerText, options: { choices } };
-            });
-            await Question.insertMany(questionData);
+
+                const questionData = {
+                    examId: exam._id,
+                    type: qType,
+                    text: q.text,
+                    points: q.marks || 1,
+                    order: index,
+                    correctAnswerText,
+                    options: { choices }
+                };
+
+                if (q._id && existingIds.includes(q._id.toString())) {
+                    // Update existing question document
+                    await Question.findByIdAndUpdate(q._id, questionData);
+                } else {
+                    // Create a new question document
+                    await Question.create(questionData);
+                }
+            }
         }
 
         emitDataUpdated(req, 'exams', 'update', { id: exam._id, title: exam.title, status: exam.status });
