@@ -14,6 +14,7 @@ const {
     getMappedCourses, mapCourseToCollege, removeCourseMapping,
     getMappedTrainers, mapTrainerToCourse, removeTrainerMapping
 } = require('../controllers/collegeCourseController');
+const {
     getStudentsByBatch, getStudentsByCollege, createStudent, importStudents, downloadTemplate, updateStudent, deleteStudent,
     parseStudentsExcel, importStudentsList, resetStudentPassword
 } = require('../controllers/studentController');
