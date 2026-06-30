@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const { protect, authorize } = require('../middleware/authMiddleware');
 
-const { 
     getAssignedExams, 
     getTrainerStats, 
     getWaitingRoom,
@@ -13,7 +12,8 @@ const {
     pauseSession,
     resumeSession,
     restartSession,
-    getTrainerCollegesAndCourses
+    getTrainerCollegesAndCourses,
+    resetStudentAttempt
 } = require('../controllers/trainerController');
 
 const {
@@ -36,6 +36,7 @@ router.post('/waiting-room/:key/force-submit', forceSubmitSession);
 router.post('/waiting-room/:key/pause', pauseSession);
 router.post('/waiting-room/:key/resume', resumeSession);
 router.post('/waiting-room/:key/restart', restartSession);
+router.delete('/waiting-room/:key/attempts/:attemptId', resetStudentAttempt);
 router.post('/exams/:id/publish', publishTrainerExam);
 
 // Daily Training Logs CRUD Routes

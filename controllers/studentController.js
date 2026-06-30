@@ -576,3 +576,43 @@ exports.createStudent = async (req, res) => {
         res.status(400).json({ success: false, error: error.message });
     }
 };
+
+// @desc    Reset student password (direct override)
+// @route   POST /api/admin/batches/:batchId/students/:studentId/reset-password
+exports.resetStudentPassword = async (req, res) => {
+    try {
+        const student = await Student.findById(req.params.studentId);
+        if (!student) {
+            return res.status(404).json({ success: false, error: 'Student not found' });
+        }
+
+        if (['trainer', 'regional_manager', 'asst_rm'].includes(req.user.role)) {
+            const batch = await Batch.findById(student.batchId);
+            if (!batch) {
+                return res.status(404).json({ success: false, error: 'Batch not found for student' });
+            }
+            const collegesList = [
+                ...(req.user.collegeId ? [req.user.collegeId.toString()] : []),
+                ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges.map(c => c.toString()) : [])
+            ];
+            if (!collegesList.includes(batch.collegeId.toString())) {
+                return res.status(403).json({ success: false, error: 'Not authorized to reset password for this student' });
+            }
+        }
+
+        const { newPassword } = req.body;
+        if (!newPassword || newPassword.trim().length < 4) {
+            return res.status(400).json({ success: false, error: 'New password is required (min 4 characters)' });
+        }
+
+        student.password = newPassword;
+        await student.save();
+
+        await logAudit(req, 'RESET_STUDENT_PASSWORD', 'Student', student._id, student.name);
+
+        res.json({ success: true, message: 'Student password reset successfully' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+

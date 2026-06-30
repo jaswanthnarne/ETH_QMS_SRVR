@@ -1136,7 +1136,7 @@ exports.deleteExam = async (req, res) => {
 exports.bulkImportQuestions = async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
-        const { examId } = req.body;
+        const { examId, overwrite } = req.body;
         if (!examId) return res.status(400).json({ success: false, error: 'examId is required' });
 
         const exam = await Exam.findById(examId);
@@ -1149,7 +1149,13 @@ exports.bulkImportQuestions = async (req, res) => {
 
         const questions = [];
         const errors = [];
-        const existingQuestionCount = await Question.countDocuments({ examId });
+
+        const isOverwrite = overwrite === 'true' || overwrite === true;
+        if (isOverwrite) {
+            await Question.deleteMany({ examId });
+        }
+
+        const existingQuestionCount = isOverwrite ? 0 : await Question.countDocuments({ examId });
         let questionOrder = existingQuestionCount + 1;
 
         sheet.eachRow((row, rowNumber) => {

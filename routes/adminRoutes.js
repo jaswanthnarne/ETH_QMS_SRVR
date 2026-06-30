@@ -14,9 +14,8 @@ const {
     getMappedCourses, mapCourseToCollege, removeCourseMapping,
     getMappedTrainers, mapTrainerToCourse, removeTrainerMapping
 } = require('../controllers/collegeCourseController');
-const {
     getStudentsByBatch, getStudentsByCollege, createStudent, importStudents, downloadTemplate, updateStudent, deleteStudent,
-    parseStudentsExcel, importStudentsList
+    parseStudentsExcel, importStudentsList, resetStudentPassword
 } = require('../controllers/studentController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const multer = require('multer');
@@ -92,6 +91,7 @@ router.post('/batches/:batchId/students/import-list', authorize(...ALL_ADMINS, '
 router.post('/batches/:batchId/students/import', authorize(...ALL_ADMINS, 'trainer'), upload.single('file'), importStudents);
 router.get('/batches/:batchId/students/template', authorize(...ALL_ADMINS, 'trainer'), downloadTemplate);
 router.put('/batches/:batchId/students/:studentId', authorize(...ALL_ADMINS, 'trainer'), updateStudent);
+router.post('/batches/:batchId/students/:studentId/reset-password', authorize(...ALL_ADMINS, 'trainer'), resetStudentPassword);
 router.delete('/batches/:batchId/students/:studentId', authorize(...ALL_ADMINS, 'trainer'), deleteStudent);
 router.get('/colleges/:collegeId/students', authorize(...ALL_ADMINS), getStudentsByCollege);
 

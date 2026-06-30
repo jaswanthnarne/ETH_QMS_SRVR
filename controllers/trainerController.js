@@ -575,3 +575,48 @@ exports.getTrainerCollegesAndCourses = async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 };
+
+// DELETE /api/trainer/waiting-room/:key/attempts/:attemptId
+// Trainer resets/deletes a student's attempt to let them retake the exam
+exports.resetStudentAttempt = async (req, res) => {
+    try {
+        const { key, attemptId } = req.params;
+        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id });
+        if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
+
+        const attempt = await StudentAttempt.findById(attemptId);
+        if (!attempt) return res.status(404).json({ success: false, error: 'Attempt not found' });
+
+        // Ensure this attempt belongs to the correct exam
+        if (attempt.examId.toString() !== keyDoc.examId.toString()) {
+            return res.status(403).json({ success: false, error: 'Unauthorized attempt reset' });
+        }
+
+        const rollNumber = attempt.studentDetails?.rollNumber;
+
+        await attempt.deleteOne();
+        
+        try {
+            const { logAudit } = require('../utils/auditHelper');
+            await logAudit(req, 'RESET_STUDENT_ATTEMPT', 'StudentAttempt', attemptId, `Reset attempt for roll: ${rollNumber}`);
+        } catch (auditErr) {
+            console.error('Audit logging failed for resetStudentAttempt:', auditErr);
+        }
+
+        // Notify client-student via socket if active to force reload
+        const io = req.app.get('socketio');
+        if (io) {
+            // Find all active keys for this exam to cover multi-batch
+            const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id, isActive: true });
+            allKeys.forEach(k => {
+                const roomId = `exam_${k.uniqueKey}`;
+                io.to(roomId).emit('session_ended', { resetRollNumber: rollNumber, timestamp: new Date() });
+            });
+        }
+
+        res.json({ success: true, message: 'Student attempt reset successfully' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
