@@ -183,8 +183,12 @@ exports.getWaitingRoom = async (req, res) => {
 
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid exam key or not authorized' });
 
-        // Get attempts for this key (session)
-        const attempts = await StudentAttempt.find({ sessionId: keyDoc._id })
+        // Find all active keys for this exam by this trainer
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId?._id, trainerId: req.user._id, isActive: true });
+        const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
+
+        // Get attempts for all these keys (sessions)
+        const attempts = await StudentAttempt.find({ sessionId: { $in: keyIds } })
             .select('studentDetails status totalScore percentage result startedAt completedAt violations');
 
         res.json({
@@ -230,13 +234,20 @@ exports.getWaitingRoom = async (req, res) => {
 exports.startSession = async (req, res) => {
     try {
         const { key } = req.params;
-        const keyDoc = await TrainerExamKey.findOneAndUpdate(
-            { uniqueKey: key, trainerId: req.user._id, isActive: true },
-            { isStarted: true },
-            { new: true }
+        const keyDoc = await TrainerExamKey.findOne(
+            { uniqueKey: key, trainerId: req.user._id, isActive: true }
         ).populate('examId');
 
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
+
+        // Update all active keys of this exam for this trainer
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId?._id, trainerId: req.user._id, isActive: true });
+        const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
+
+        await TrainerExamKey.updateMany(
+            { _id: { $in: keyIds } },
+            { isStarted: true }
+        );
 
         const Notification = require('../models/Notification');
         const trainerName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || req.user.phone || req.user.username;
@@ -415,8 +426,12 @@ exports.forceSubmitSession = async (req, res) => {
         const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id, isActive: true });
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
 
+        // Find all active keys for this exam and trainer
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id, isActive: true });
+        const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
+
         const activeAttempts = await StudentAttempt.find({ 
-            sessionId: keyDoc._id,
+            sessionId: { $in: keyIds },
             status: { $in: ['started', 'active', 'violated'] } 
         }).populate('examId');
 
@@ -469,8 +484,11 @@ exports.forceSubmitSession = async (req, res) => {
             await attempt.save();
         }
 
-        keyDoc.isActive = false;
-        await keyDoc.save();
+        // Deactivate all these keys
+        await TrainerExamKey.updateMany(
+            { _id: { $in: keyIds } },
+            { isActive: false }
+        );
 
         res.json({ success: true, message: `Force-submitted ${activeAttempts.length} active sessions and ended the exam.` });
     } catch (error) {
@@ -481,12 +499,16 @@ exports.forceSubmitSession = async (req, res) => {
 exports.pauseSession = async (req, res) => {
     try {
         const { key } = req.params;
-        const keyDoc = await TrainerExamKey.findOneAndUpdate(
-            { uniqueKey: key, trainerId: req.user._id },
-            { isPaused: true },
-            { new: true }
-        );
+        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id });
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
+
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id, isActive: true });
+        const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
+
+        await TrainerExamKey.updateMany(
+            { _id: { $in: keyIds } },
+            { isPaused: true }
+        );
         res.json({ success: true, message: 'Session paused successfully' });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -496,12 +518,16 @@ exports.pauseSession = async (req, res) => {
 exports.resumeSession = async (req, res) => {
     try {
         const { key } = req.params;
-        const keyDoc = await TrainerExamKey.findOneAndUpdate(
-            { uniqueKey: key, trainerId: req.user._id },
-            { isPaused: false },
-            { new: true }
-        );
+        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id });
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
+
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id, isActive: true });
+        const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
+
+        await TrainerExamKey.updateMany(
+            { _id: { $in: keyIds } },
+            { isPaused: false }
+        );
         res.json({ success: true, message: 'Session resumed successfully' });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -511,12 +537,16 @@ exports.resumeSession = async (req, res) => {
 exports.restartSession = async (req, res) => {
     try {
         const { key } = req.params;
-        const keyDoc = await TrainerExamKey.findOneAndUpdate(
-            { uniqueKey: key, trainerId: req.user._id },
-            { isActive: true, isPaused: false, isStarted: true },
-            { new: true }
-        );
+        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id });
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
+
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id });
+        const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
+
+        await TrainerExamKey.updateMany(
+            { _id: { $in: keyIds } },
+            { isActive: true, isPaused: false, isStarted: true }
+        );
         res.json({ success: true, message: 'Session restarted successfully' });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });

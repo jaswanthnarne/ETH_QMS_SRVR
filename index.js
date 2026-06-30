@@ -150,26 +150,55 @@ io.on('connection', (socket) => {
     });
 
     // Trainer joins to monitor
-    socket.on('trainer_monitor', (examKey) => {
-        const roomId = `exam_${examKey}`;
-        socket.join(roomId);
-        socket.role = 'trainer';
-        console.log(`Trainer joined monitor room: ${roomId}`);
+    socket.on('trainer_monitor', async (examKey) => {
+        try {
+            const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey });
+            if (keyDoc) {
+                // Find all active keys for this exam and trainer
+                const allKeys = await TrainerExamKey.find({ 
+                    examId: keyDoc.examId, 
+                    trainerId: keyDoc.trainerId, 
+                    isActive: true 
+                });
+                
+                allKeys.forEach(k => {
+                    const roomId = `exam_${k.uniqueKey}`;
+                    socket.join(roomId);
+                    console.log(`Trainer joined monitor room: ${roomId}`);
+                });
+            } else {
+                const roomId = `exam_${examKey}`;
+                socket.join(roomId);
+                console.log(`Trainer joined monitor room (fallback): ${roomId}`);
+            }
+            socket.role = 'trainer';
+        } catch (error) {
+            console.error('Error in trainer_monitor:', error);
+            const roomId = `exam_${examKey}`;
+            socket.join(roomId);
+            socket.role = 'trainer';
+        }
     });
 
     // Trainer starts exam session
     socket.on('trainer_start_session', async (examKey) => {
-        const roomId = `exam_${examKey}`;
-        
         try {
             // Update DB so late joiners see it as started
-            const keyDoc = await TrainerExamKey.findOneAndUpdate(
-                { uniqueKey: examKey },
-                { isStarted: true },
-                { new: true }
-            ).populate('examId').populate('trainerId');
-            
+            const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey }).populate('examId').populate('trainerId');
             if (keyDoc) {
+                // Find all active keys for this exam and trainer
+                const allKeys = await TrainerExamKey.find({ 
+                    examId: keyDoc.examId?._id, 
+                    trainerId: keyDoc.trainerId?._id, 
+                    isActive: true 
+                });
+                const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
+
+                await TrainerExamKey.updateMany(
+                    { _id: { $in: keyIds } },
+                    { isStarted: true }
+                );
+                
                 const Notification = require('./models/Notification');
                 const trainerName = keyDoc.trainerId 
                     ? `${keyDoc.trainerId.firstName || ''} ${keyDoc.trainerId.lastName || ''}`.trim() || keyDoc.trainerId.phone || keyDoc.trainerId.username 
@@ -195,45 +224,98 @@ io.on('connection', (socket) => {
                         isRead: false
                     });
                 }
+
+                // Emit session_started to all these rooms
+                allKeys.forEach(k => {
+                    const roomId = `exam_${k.uniqueKey}`;
+                    io.to(roomId).emit('session_started', {
+                        examKey: k.uniqueKey,
+                        timestamp: new Date()
+                    });
+                    console.log(`Socket broadcast: started exam session for key: ${k.uniqueKey}`);
+                });
             }
-            
-            io.to(roomId).emit('session_started', {
-                examKey,
-                timestamp: new Date()
-            });
-            console.log(`Trainer started exam session for key: ${examKey}`);
         } catch (error) {
             console.error('Error starting session in DB:', error);
         }
     });
 
     // Trainer instantly force-closes the exam session
-    socket.on('trainer_end_session', (examKey) => {
-        const roomId = `exam_${examKey}`;
-        io.to(roomId).emit('session_ended', { examKey, timestamp: new Date() });
-        console.log(`Trainer manually force-closed exam session for key: ${examKey}`);
+    socket.on('trainer_end_session', async (examKey) => {
+        try {
+            const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey });
+            if (keyDoc) {
+                const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId });
+                allKeys.forEach(k => {
+                    const roomId = `exam_${k.uniqueKey}`;
+                    io.to(roomId).emit('session_ended', { examKey: k.uniqueKey, timestamp: new Date() });
+                    console.log(`Socket broadcast: ended exam session for key: ${k.uniqueKey}`);
+                });
+            } else {
+                io.to(`exam_${examKey}`).emit('session_ended', { examKey, timestamp: new Date() });
+            }
+        } catch (error) {
+            console.error('Error in trainer_end_session:', error);
+            io.to(`exam_${examKey}`).emit('session_ended', { examKey, timestamp: new Date() });
+        }
     });
 
-    socket.on('trainer_pause_session', (examKey) => {
-        const roomId = `exam_${examKey}`;
-        io.to(roomId).emit('session_paused', { examKey, timestamp: new Date() });
-        console.log(`Trainer paused exam session for key: ${examKey}`);
+    socket.on('trainer_pause_session', async (examKey) => {
+        try {
+            const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey });
+            if (keyDoc) {
+                const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId, isActive: true });
+                allKeys.forEach(k => {
+                    const roomId = `exam_${k.uniqueKey}`;
+                    io.to(roomId).emit('session_paused', { examKey: k.uniqueKey, timestamp: new Date() });
+                    console.log(`Socket broadcast: paused exam session for key: ${k.uniqueKey}`);
+                });
+            } else {
+                io.to(`exam_${examKey}`).emit('session_paused', { examKey, timestamp: new Date() });
+            }
+        } catch (error) {
+            console.error('Error in trainer_pause_session:', error);
+            io.to(`exam_${examKey}`).emit('session_paused', { examKey, timestamp: new Date() });
+        }
     });
 
-    socket.on('trainer_resume_session', (examKey) => {
-        const roomId = `exam_${examKey}`;
-        io.to(roomId).emit('session_resumed', { examKey, timestamp: new Date() });
-        console.log(`Trainer resumed exam session for key: ${examKey}`);
+    socket.on('trainer_resume_session', async (examKey) => {
+        try {
+            const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey });
+            if (keyDoc) {
+                const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId, isActive: true });
+                allKeys.forEach(k => {
+                    const roomId = `exam_${k.uniqueKey}`;
+                    io.to(roomId).emit('session_resumed', { examKey: k.uniqueKey, timestamp: new Date() });
+                    console.log(`Socket broadcast: resumed exam session for key: ${k.uniqueKey}`);
+                });
+            } else {
+                io.to(`exam_${examKey}`).emit('session_resumed', { examKey, timestamp: new Date() });
+            }
+        } catch (error) {
+            console.error('Error in trainer_resume_session:', error);
+            io.to(`exam_${examKey}`).emit('session_resumed', { examKey, timestamp: new Date() });
+        }
     });
 
-    socket.on('trainer_restart_session', (examKey) => {
-        const roomId = `exam_${examKey}`;
-        console.log(`Trainer restarted exam session for key: ${examKey}`);
+    socket.on('trainer_restart_session', async (examKey) => {
+        try {
+            const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey });
+            if (keyDoc) {
+                const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId });
+                allKeys.forEach(k => {
+                    const roomId = `exam_${k.uniqueKey}`;
+                    io.to(roomId).emit('session_started', { examKey: k.uniqueKey, timestamp: new Date() });
+                    console.log(`Socket broadcast: restarted/started exam session for key: ${k.uniqueKey}`);
+                });
+            }
+        } catch (error) {
+            console.error('Error in trainer_restart_session:', error);
+        }
     });
 
     // ========== LIVE CHAT (Student <-> Trainer) ==========
     socket.on('chat_message', async ({ examKey, senderRole, senderName, senderId, message, recipientId }) => {
-        const roomId = `exam_${examKey}`;
         try {
             // Persist the message
             const chatMsg = await ChatMessage.create({
@@ -246,16 +328,48 @@ io.on('connection', (socket) => {
             });
 
             // Broadcast to the room (trainers + that student)
-            io.to(roomId).emit('chat_message', {
-                id: chatMsg._id,
-                examKey,
-                senderRole,
-                senderName,
-                senderId,
-                message,
-                recipientId: recipientId || null,
-                timestamp: chatMsg.createdAt
-            });
+            if (senderRole === 'trainer') {
+                const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey });
+                if (keyDoc) {
+                    const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId, isActive: true });
+                    allKeys.forEach(k => {
+                        const roomId = `exam_${k.uniqueKey}`;
+                        io.to(roomId).emit('chat_message', {
+                            id: chatMsg._id,
+                            examKey: k.uniqueKey,
+                            senderRole,
+                            senderName,
+                            senderId,
+                            message,
+                            recipientId: recipientId || null,
+                            timestamp: chatMsg.createdAt
+                        });
+                    });
+                } else {
+                    io.to(`exam_${examKey}`).emit('chat_message', {
+                        id: chatMsg._id,
+                        examKey,
+                        senderRole,
+                        senderName,
+                        senderId,
+                        message,
+                        recipientId: recipientId || null,
+                        timestamp: chatMsg.createdAt
+                    });
+                }
+            } else {
+                const roomId = `exam_${examKey}`;
+                io.to(roomId).emit('chat_message', {
+                    id: chatMsg._id,
+                    examKey,
+                    senderRole,
+                    senderName,
+                    senderId,
+                    message,
+                    recipientId: recipientId || null,
+                    timestamp: chatMsg.createdAt
+                });
+            }
         } catch (error) {
             console.error('Chat message error:', error);
         }
@@ -264,7 +378,13 @@ io.on('connection', (socket) => {
     // Fetch chat history when joining
     socket.on('fetch_chat_history', async ({ examKey }) => {
         try {
-            const messages = await ChatMessage.find({ examKey })
+            const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey });
+            let query = { examKey };
+            if (keyDoc) {
+                const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId });
+                query = { examKey: { $in: allKeys.map(k => k.uniqueKey) } };
+            }
+            const messages = await ChatMessage.find(query)
                 .sort({ createdAt: 1 })
                 .limit(200)
                 .lean();
@@ -284,14 +404,27 @@ io.on('connection', (socket) => {
     });
 
     // ========== BROADCAST ANNOUNCEMENTS (Trainer -> All Students) ==========
-    socket.on('trainer_broadcast', ({ examKey, message, trainerName }) => {
-        const roomId = `exam_${examKey}`;
-        io.to(roomId).emit('broadcast_announcement', {
-            message,
-            trainerName,
-            timestamp: new Date()
-        });
-        console.log(`Trainer broadcast in ${roomId}: "${message}"`);
+    socket.on('trainer_broadcast', async ({ examKey, message, trainerName }) => {
+        try {
+            const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey });
+            if (keyDoc) {
+                const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId, isActive: true });
+                allKeys.forEach(k => {
+                    const roomId = `exam_${k.uniqueKey}`;
+                    io.to(roomId).emit('broadcast_announcement', {
+                        message,
+                        trainerName,
+                        timestamp: new Date()
+                    });
+                });
+                console.log(`Trainer broadcast in ${allKeys.length} rooms for exam ${keyDoc.examId}: "${message}"`);
+            } else {
+                io.to(`exam_${examKey}`).emit('broadcast_announcement', { message, trainerName, timestamp: new Date() });
+            }
+        } catch (error) {
+            console.error('Error in trainer_broadcast:', error);
+            io.to(`exam_${examKey}`).emit('broadcast_announcement', { message, trainerName, timestamp: new Date() });
+        }
     });
 
     socket.on('disconnect', async () => {
