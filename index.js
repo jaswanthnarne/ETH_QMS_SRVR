@@ -483,21 +483,28 @@ setInterval(async () => {
             for (const attempt of staleAttempts) {
                 if (!attempt.examId) continue;
 
-                const questions = await Question.find({ examId: attempt.examId._id });
-                let totalScore = 0;
-                const processedQuestionIds = new Set();
-                
-                attempt.answers.forEach(a => {
-                    const qIdStr = a.questionId.toString();
-                    if (processedQuestionIds.has(qIdStr)) return;
-                    processedQuestionIds.add(qIdStr);
-
-                    const question = questions.find(q => q._id.toString() === qIdStr);
-                    if (question) {
-                        let isCorrect = false;
-                        const ans = a.answer;
-
-                        if (ans !== undefined && ans !== null && ans !== '') {
+                 let questions;
+                 if (attempt.assignedQuestions && attempt.assignedQuestions.length > 0) {
+                     const unordered = await Question.find({ _id: { $in: attempt.assignedQuestions } });
+                     const parsedIds = attempt.assignedQuestions.map(id => id.toString());
+                     questions = parsedIds.map(id => unordered.find(q => q._id.toString() === id)).filter(Boolean);
+                 } else {
+                     questions = await Question.find({ examId: attempt.examId._id }).sort({ order: 1 });
+                 }
+                 let totalScore = 0;
+                 const processedQuestionIds = new Set();
+                 
+                 attempt.answers.forEach(a => {
+                     const qIdStr = a.questionId.toString();
+                     if (processedQuestionIds.has(qIdStr)) return;
+                     processedQuestionIds.add(qIdStr);
+ 
+                     const question = questions.find(q => q._id.toString() === qIdStr);
+                     if (question) {
+                         let isCorrect = false;
+                         const ans = a.answer;
+ 
+                         if (ans !== undefined && ans !== null && ans !== '' && (!Array.isArray(ans) || ans.filter(v => v !== null && v !== undefined && v !== '').length > 0)) {
                             if (question.type === 'single_correct' || question.type === 'true_false' || question.type === 'mcq') {
                                 const correctChoice = question.options?.choices?.find(c => c.isCorrect);
                                 const ansStr = Array.isArray(ans) ? ans[0] : ans;

@@ -91,7 +91,14 @@ exports.getExamByEntryKey = async (req, res) => {
 
         if (attempt && attempt.status === 'completed') {
             // Return result with review data if already completed
-            const questionsForReview = await Question.find({ examId: exam._id }).sort({ order: 1 });
+            let questionsForReview;
+            if (attempt.assignedQuestions && attempt.assignedQuestions.length > 0) {
+                const unordered = await Question.find({ _id: { $in: attempt.assignedQuestions } });
+                const parsedIds = attempt.assignedQuestions.map(id => id.toString());
+                questionsForReview = parsedIds.map(id => unordered.find(q => q._id.toString() === id)).filter(Boolean);
+            } else {
+                questionsForReview = await Question.find({ examId: exam._id }).sort({ order: 1 });
+            }
             const reviewData = questionsForReview.map(q => {
                 const studentAnswer = attempt.answers.find(a => a.questionId.toString() === q._id.toString());
                 const correctAnswer = q.type === 'fill_blank' || q.type === 'numeric'
@@ -566,7 +573,14 @@ exports.submitExamAttempt = async (req, res) => {
             });
         }
 
-        const questions = await Question.find({ examId: attempt.examId._id });
+        let questions;
+        if (attempt.assignedQuestions && attempt.assignedQuestions.length > 0) {
+            const unordered = await Question.find({ _id: { $in: attempt.assignedQuestions } });
+            const parsedIds = attempt.assignedQuestions.map(id => id.toString());
+            questions = parsedIds.map(id => unordered.find(q => q._id.toString() === id)).filter(Boolean);
+        } else {
+            questions = await Question.find({ examId: attempt.examId._id }).sort({ order: 1 });
+        }
         let totalScore = 0;
 
         const processedQuestionIds = new Set();
@@ -580,7 +594,7 @@ exports.submitExamAttempt = async (req, res) => {
                 let isCorrect = false;
                 const ans = a.answer;
 
-                if (ans !== undefined && ans !== null && ans !== '') {
+                if (ans !== undefined && ans !== null && ans !== '' && (!Array.isArray(ans) || ans.filter(v => v !== null && v !== undefined && v !== '').length > 0)) {
                     if (question.type === 'single_correct' || question.type === 'true_false' || question.type === 'mcq') {
                         const correctChoice = question.options?.choices?.find(c => c.isCorrect);
                         const ansStr = Array.isArray(ans) ? ans[0] : ans;
@@ -681,7 +695,14 @@ exports.resumeSession = async (req, res) => {
             const timeSinceDisconnect = Date.now() - new Date(attempt.lastDisconnected).getTime();
             if (timeSinceDisconnect > 180000) {
                 // Expired reconnection window -> Auto evaluate & submit
-                const questions = await Question.find({ examId: attempt.examId._id });
+                let questions;
+                if (attempt.assignedQuestions && attempt.assignedQuestions.length > 0) {
+                    const unordered = await Question.find({ _id: { $in: attempt.assignedQuestions } });
+                    const parsedIds = attempt.assignedQuestions.map(id => id.toString());
+                    questions = parsedIds.map(id => unordered.find(q => q._id.toString() === id)).filter(Boolean);
+                } else {
+                    questions = await Question.find({ examId: attempt.examId._id }).sort({ order: 1 });
+                }
                 let totalScore = 0;
                 
                 const processedQuestionIds = new Set();
@@ -695,7 +716,7 @@ exports.resumeSession = async (req, res) => {
                         let isCorrect = false;
                         const ans = a.answer;
 
-                        if (ans !== undefined && ans !== null && ans !== '') {
+                        if (ans !== undefined && ans !== null && ans !== '' && (!Array.isArray(ans) || ans.filter(v => v !== null && v !== undefined && v !== '').length > 0)) {
                             if (question.type === 'single_correct' || question.type === 'true_false' || question.type === 'mcq') {
                                 const correctChoice = question.options?.choices?.find(c => c.isCorrect);
                                 const ansStr = Array.isArray(ans) ? ans[0] : ans;
