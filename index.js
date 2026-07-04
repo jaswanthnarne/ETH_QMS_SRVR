@@ -37,7 +37,7 @@ app.set('socketio', io);
 app.use(express.json());
 
 const allowedOrigins = [
-    'https://eth-qms-ui-b2md.vercel.app',
+    'https://eth-qms-ui.vercel.app',
     'https://ethops.jaswanthnarne.online',
     'http://localhost',
     'https://localhost',
