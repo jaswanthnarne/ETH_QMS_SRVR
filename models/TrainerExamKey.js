@@ -33,6 +33,15 @@ const trainerExamKeySchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    pausedAt: Date,
+    accumulatedPauseTime: {
+        type: Number,
+        default: 0
+    },
+    extraTime: {
+        type: Number,
+        default: 0
+    },
     lastUsed: Date
 }, {
     timestamps: true

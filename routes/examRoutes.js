@@ -8,7 +8,10 @@ const {
     updateProgress,
     getExamSettingsByKey,
     resumeSession,
-    updateViolations
+    updateViolations,
+    pollExamSessionState,
+    sendChatMessage,
+    sendBroadcast
 } = require('../controllers/examController');
 const { generateCertificate } = require('../utils/certificateGenerator');
 const StudentAttempt = require('../models/StudentAttempt');
@@ -24,6 +27,9 @@ router.post('/start-attempt', startAttempt);
 router.post('/update-progress', updateProgress);
 router.post('/update-violations', updateViolations);
 router.get('/resume/:sessionId', resumeSession);
+router.get('/poll/:key/:rollNumber?', pollExamSessionState);
+router.post('/chat', sendChatMessage);
+router.post('/broadcast', sendBroadcast);
 
 // Student-accessible certificate download (no auth, uses rollNumber + attemptId as verification)
 // GET /api/exam/certificate/:attemptId?rollNumber=xxx

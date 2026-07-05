@@ -191,6 +191,12 @@ exports.getWaitingRoom = async (req, res) => {
         const attempts = await StudentAttempt.find({ sessionId: { $in: keyIds } })
             .select('studentDetails status totalScore percentage result startedAt completedAt violations');
 
+        const ChatMessage = require('../models/ChatMessage');
+        const chatMessages = await ChatMessage.find({ examKey: { $in: [keyDoc.uniqueKey, ...allKeys.map(k => k.uniqueKey)] } })
+            .sort({ createdAt: 1 })
+            .limit(200)
+            .lean();
+
         res.json({
             success: true,
             data: {
@@ -222,6 +228,16 @@ exports.getWaitingRoom = async (req, res) => {
                     startedAt: a.startedAt,
                     completedAt: a.completedAt,
                     violations: (a.violations?.tabSwitches || 0) + (a.violations?.fullScreenExits || 0) + (a.violations?.copyAttempts || 0)
+                })),
+                chatMessages: chatMessages.map(m => ({
+                    id: m._id,
+                    examKey: m.examKey,
+                    senderRole: m.senderRole,
+                    senderName: m.senderName,
+                    senderId: m.senderId,
+                    message: m.message,
+                    recipientId: m.recipientId,
+                    timestamp: m.createdAt
                 }))
             }
         });
@@ -437,16 +453,24 @@ exports.forceSubmitSession = async (req, res) => {
 
         // Logic from examController's submit operation but applied in batch
         const Question = require('../models/Question');
-        const questions = await Question.find({ examId: keyDoc.examId });
+        const allExamQuestions = await Question.find({ examId: keyDoc.examId });
 
         for (const attempt of activeAttempts) {
+            let attemptQuestions;
+            if (attempt.assignedQuestions && attempt.assignedQuestions.length > 0) {
+                const parsedIds = attempt.assignedQuestions.map(id => id.toString());
+                attemptQuestions = parsedIds.map(id => allExamQuestions.find(q => q._id.toString() === id)).filter(Boolean);
+            } else {
+                attemptQuestions = allExamQuestions;
+            }
+
             let totalScore = 0;
             attempt.answers.forEach(a => {
-                const question = questions.find(qu => qu._id.toString() === a.questionId.toString());
+                const question = attemptQuestions.find(qu => qu._id.toString() === a.questionId.toString());
                 if (question) {
                     let isCorrect = false;
                     const ans = a.answer;
-                    if (ans !== undefined && ans !== null && ans !== '') {
+                    if (ans !== undefined && ans !== null && ans !== '' && (!Array.isArray(ans) || ans.filter(v => v !== null && v !== undefined && v !== '').length > 0)) {
                         if (question.type === 'single_correct' || question.type === 'true_false' || question.type === 'mcq') {
                             const correctChoice = question.options?.choices?.find(c => c.isCorrect);
                             const ansStr = Array.isArray(ans) ? ans[0] : ans;
@@ -474,7 +498,7 @@ exports.forceSubmitSession = async (req, res) => {
                 }
             });
 
-            const maxScore = attempt.examId.totalMarks || questions.reduce((acc, q) => acc + q.points, 0) || 1;
+            const maxScore = attempt.examId.totalMarks || attemptQuestions.reduce((acc, q) => acc + q.points, 0) || 1;
             attempt.totalScore = totalScore;
             attempt.percentage = (totalScore / maxScore) * 100;
             attempt.result = attempt.percentage >= (attempt.examId.passingPercentage || 40) ? 'pass' : 'fail';
@@ -507,7 +531,7 @@ exports.pauseSession = async (req, res) => {
 
         await TrainerExamKey.updateMany(
             { _id: { $in: keyIds } },
-            { isPaused: true }
+            { isPaused: true, pausedAt: new Date() }
         );
         res.json({ success: true, message: 'Session paused successfully' });
     } catch (error) {
@@ -524,10 +548,18 @@ exports.resumeSession = async (req, res) => {
         const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id, isActive: true });
         const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
 
-        await TrainerExamKey.updateMany(
-            { _id: { $in: keyIds } },
-            { isPaused: false }
-        );
+        const activeKeys = await TrainerExamKey.find({ _id: { $in: keyIds } });
+        for (const k of activeKeys) {
+            let addPause = 0;
+            if (k.pausedAt) {
+                addPause = Math.floor((Date.now() - new Date(k.pausedAt).getTime()) / 1000);
+            }
+            k.isPaused = false;
+            k.accumulatedPauseTime = (k.accumulatedPauseTime || 0) + addPause;
+            k.pausedAt = null;
+            await k.save();
+        }
+
         res.json({ success: true, message: 'Session resumed successfully' });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -615,6 +647,38 @@ exports.resetStudentAttempt = async (req, res) => {
         }
 
         res.json({ success: true, message: 'Student attempt reset successfully' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.addExtraTime = async (req, res) => {
+    try {
+        const { key } = req.params;
+        const { minutes } = req.body;
+        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id });
+        if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
+
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id, isActive: true });
+        const keyIds = allKeys.map(k => k._id);
+
+        await TrainerExamKey.updateMany(
+            { _id: { $in: keyIds } },
+            { $inc: { extraTime: Number(minutes) } }
+        );
+
+        // Notify active socket clients about the time addition
+        const io = req.app.get('socketio');
+        if (io) {
+            allKeys.forEach(k => {
+                io.to(`exam_${k.uniqueKey}`).emit('time_added', {
+                    minutes: Number(minutes),
+                    timestamp: new Date()
+                });
+            });
+        }
+
+        res.json({ success: true, message: `Successfully added ${minutes} minutes of extra time.` });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }

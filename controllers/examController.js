@@ -7,6 +7,31 @@ const Batch = require('../models/Batch');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 
+const checkAndAutoEndSession = async (sessionId, io) => {
+    if (!sessionId) return;
+    try {
+        const activeCount = await StudentAttempt.countDocuments({
+            sessionId,
+            status: { $in: ['started', 'active', 'violated'] }
+        });
+        if (activeCount === 0) {
+            await TrainerExamKey.findByIdAndUpdate(sessionId, { isActive: false });
+            if (io) {
+                const keyDoc = await TrainerExamKey.findById(sessionId);
+                if (keyDoc) {
+                    io.to(`exam_${keyDoc.uniqueKey}`).emit('session_ended', { 
+                        examKey: keyDoc.uniqueKey, 
+                        timestamp: new Date() 
+                    });
+                    console.log(`Socket broadcast (auto-end): ended session for key: ${keyDoc.uniqueKey}`);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Error in checkAndAutoEndSession:', e);
+    }
+};
+
 exports.getExamByEntryKey = async (req, res) => {
     try {
         const { key } = req.params;
@@ -635,6 +660,7 @@ exports.submitExamAttempt = async (req, res) => {
         if (violations) attempt.violations = violations;
 
         await attempt.save();
+        await checkAndAutoEndSession(attempt.sessionId, req.app.get('socketio'));
 
         // Build per-question review data to send back
         const reviewData = questions.map(q => {
@@ -758,6 +784,7 @@ exports.resumeSession = async (req, res) => {
                 attempt.violations.reason = 'Reconnection window expired. Exam auto-submitted.';
                 
                 await attempt.save();
+                await checkAndAutoEndSession(attempt.sessionId, req.app.get('socketio'));
                 return res.status(403).json({ success: false, error: 'Reconnection window expired. Exam auto-submitted.' });
             }
         }
@@ -778,6 +805,148 @@ exports.resumeSession = async (req, res) => {
                 email: attempt.studentDetails.email
             }
         });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.pollExamSessionState = async (req, res) => {
+    try {
+        const { key, rollNumber } = req.params;
+        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key }).populate('examId');
+        if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid exam key' });
+
+        // Fetch chat history for this exam key
+        const ChatMessage = require('../models/ChatMessage');
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId?._id });
+        const chatMessages = await ChatMessage.find({ examKey: { $in: allKeys.map(k => k.uniqueKey) } })
+            .sort({ createdAt: 1 })
+            .limit(200)
+            .lean();
+
+        // Calculate student's remaining time
+        let remainingSeconds = keyDoc.examId?.duration * 60;
+        if (rollNumber) {
+            const attempt = await StudentAttempt.findOne({ examId: keyDoc.examId?._id, 'studentDetails.rollNumber': rollNumber });
+            if (attempt && attempt.startedAt) {
+                const totalDurationSeconds = (keyDoc.examId?.duration + (keyDoc.extraTime || 0)) * 60;
+                let totalPause = keyDoc.accumulatedPauseTime || 0;
+                if (keyDoc.isPaused && keyDoc.pausedAt) {
+                    totalPause += Math.floor((Date.now() - new Date(keyDoc.pausedAt).getTime()) / 1000);
+                }
+                const elapsedSeconds = Math.floor((Date.now() - new Date(attempt.startedAt).getTime()) / 1000) - totalPause;
+                remainingSeconds = Math.max(0, totalDurationSeconds - elapsedSeconds);
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                isStarted: keyDoc.isStarted,
+                isPaused: keyDoc.isPaused,
+                isEnded: !keyDoc.isActive,
+                latestBroadcast: keyDoc.latestBroadcast || null,
+                remainingSeconds,
+                chatMessages: chatMessages.map(m => ({
+                    id: m._id,
+                    examKey: m.examKey,
+                    senderRole: m.senderRole,
+                    senderName: m.senderName,
+                    senderId: m.senderId,
+                    message: m.message,
+                    recipientId: m.recipientId,
+                    timestamp: m.createdAt
+                }))
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.sendChatMessage = async (req, res) => {
+    try {
+        const { examKey, senderRole, senderName, senderId, message, recipientId } = req.body;
+        const ChatMessage = require('../models/ChatMessage');
+        const chatMsg = await ChatMessage.create({
+            examKey,
+            senderRole,
+            senderName,
+            senderId,
+            message,
+            recipientId: recipientId || null
+        });
+
+        // Emit via socket if active
+        const io = req.app.get('socketio');
+        if (io) {
+            const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey });
+            if (keyDoc) {
+                const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId, isActive: true });
+                allKeys.forEach(k => {
+                    io.to(`exam_${k.uniqueKey}`).emit('chat_message', {
+                        id: chatMsg._id,
+                        examKey: k.uniqueKey,
+                        senderRole,
+                        senderName,
+                        senderId,
+                        message,
+                        recipientId: recipientId || null,
+                        timestamp: chatMsg.createdAt
+                    });
+                });
+            } else {
+                io.to(`exam_${examKey}`).emit('chat_message', {
+                    id: chatMsg._id,
+                    examKey,
+                    senderRole,
+                    senderName,
+                    senderId,
+                    message,
+                    recipientId: recipientId || null,
+                    timestamp: chatMsg.createdAt
+                });
+            }
+        }
+
+        res.json({ success: true, data: chatMsg });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.sendBroadcast = async (req, res) => {
+    try {
+        const { examKey, message, trainerName } = req.body;
+        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey });
+        const latestBroadcast = { message, timestamp: new Date() };
+
+        if (keyDoc) {
+            const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId, isActive: true });
+            const keyIds = allKeys.map(k => k._id);
+            await TrainerExamKey.updateMany(
+                { _id: { $in: keyIds } },
+                { latestBroadcast }
+            );
+
+            const io = req.app.get('socketio');
+            if (io) {
+                allKeys.forEach(k => {
+                    io.to(`exam_${k.uniqueKey}`).emit('broadcast_announcement', {
+                        message,
+                        trainerName,
+                        timestamp: new Date()
+                    });
+                });
+            }
+        } else {
+            const io = req.app.get('socketio');
+            if (io) {
+                io.to(`exam_${examKey}`).emit('broadcast_announcement', { message, trainerName, timestamp: new Date() });
+            }
+        }
+
+        res.json({ success: true, message: 'Broadcast sent successfully.' });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }

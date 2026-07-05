@@ -14,7 +14,8 @@ const {
     resumeSession,
     restartSession,
     getTrainerCollegesAndCourses,
-    resetStudentAttempt
+    resetStudentAttempt,
+    addExtraTime
 } = require('../controllers/trainerController');
 
 const {
@@ -37,6 +38,7 @@ router.post('/waiting-room/:key/force-submit', forceSubmitSession);
 router.post('/waiting-room/:key/pause', pauseSession);
 router.post('/waiting-room/:key/resume', resumeSession);
 router.post('/waiting-room/:key/restart', restartSession);
+router.post('/waiting-room/:key/extra-time', addExtraTime);
 router.delete('/waiting-room/:key/attempts/:attemptId', resetStudentAttempt);
 router.post('/exams/:id/publish', publishTrainerExam);
 
