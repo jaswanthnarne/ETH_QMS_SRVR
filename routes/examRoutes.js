@@ -27,7 +27,8 @@ router.post('/start-attempt', startAttempt);
 router.post('/update-progress', updateProgress);
 router.post('/update-violations', updateViolations);
 router.get('/resume/:sessionId', resumeSession);
-router.get('/poll/:key/:rollNumber?', pollExamSessionState);
+router.get('/poll/:key', pollExamSessionState);
+router.get('/poll/:key/:rollNumber', pollExamSessionState);
 router.post('/chat', sendChatMessage);
 router.post('/broadcast', sendBroadcast);
 
