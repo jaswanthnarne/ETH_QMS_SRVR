@@ -813,23 +813,42 @@ exports.resumeSession = async (req, res) => {
 exports.pollExamSessionState = async (req, res) => {
     try {
         const { key, rollNumber } = req.params;
-        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key }).populate('examId');
+        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key })
+            .populate({ path: 'examId', select: 'duration' })
+            .lean();
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid exam key' });
 
         // Fetch chat history for this exam key
         const ChatMessage = require('../models/ChatMessage');
-        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId?._id });
-        const chatMessages = await ChatMessage.find({ examKey: { $in: allKeys.map(k => k.uniqueKey) } })
-            .sort({ createdAt: 1 })
-            .limit(200)
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId?._id })
+            .select('uniqueKey')
             .lean();
+        const keysList = allKeys.map(k => k.uniqueKey);
+
+        const clientChatCount = req.query.chatCount !== undefined ? parseInt(req.query.chatCount, 10) : null;
+        let chatMessages = undefined;
+
+        // Fetch total chat message count first
+        const currentChatCount = await ChatMessage.countDocuments({ examKey: { $in: keysList } });
+        if (clientChatCount === null || currentChatCount !== clientChatCount) {
+            chatMessages = await ChatMessage.find({ examKey: { $in: keysList } })
+                .sort({ createdAt: 1 })
+                .limit(200)
+                .lean();
+        }
 
         // Calculate student's remaining time
-        let remainingSeconds = keyDoc.examId?.duration * 60;
+        let remainingSeconds = (keyDoc.examId?.duration || 0) * 60;
         if (rollNumber) {
-            const attempt = await StudentAttempt.findOne({ examId: keyDoc.examId?._id, 'studentDetails.rollNumber': rollNumber });
+            const attempt = await StudentAttempt.findOne({ 
+                examId: keyDoc.examId?._id, 
+                'studentDetails.rollNumber': rollNumber 
+            })
+            .select('startedAt')
+            .lean();
+            
             if (attempt && attempt.startedAt) {
-                const totalDurationSeconds = (keyDoc.examId?.duration + (keyDoc.extraTime || 0)) * 60;
+                const totalDurationSeconds = ((keyDoc.examId?.duration || 0) + (keyDoc.extraTime || 0)) * 60;
                 let totalPause = keyDoc.accumulatedPauseTime || 0;
                 if (keyDoc.isPaused && keyDoc.pausedAt) {
                     totalPause += Math.floor((Date.now() - new Date(keyDoc.pausedAt).getTime()) / 1000);
@@ -847,16 +866,18 @@ exports.pollExamSessionState = async (req, res) => {
                 isEnded: !keyDoc.isActive,
                 latestBroadcast: keyDoc.latestBroadcast || null,
                 remainingSeconds,
-                chatMessages: chatMessages.map(m => ({
-                    id: m._id,
-                    examKey: m.examKey,
-                    senderRole: m.senderRole,
-                    senderName: m.senderName,
-                    senderId: m.senderId,
-                    message: m.message,
-                    recipientId: m.recipientId,
-                    timestamp: m.createdAt
-                }))
+                ...(chatMessages !== undefined ? {
+                    chatMessages: chatMessages.map(m => ({
+                        id: m._id,
+                        examKey: m.examKey,
+                        senderRole: m.senderRole,
+                        senderName: m.senderName,
+                        senderId: m.senderId,
+                        message: m.message,
+                        recipientId: m.recipientId,
+                        timestamp: m.createdAt
+                    }))
+                } : {})
             }
         });
     } catch (error) {

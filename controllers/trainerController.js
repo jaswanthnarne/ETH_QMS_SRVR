@@ -179,23 +179,36 @@ exports.getWaitingRoom = async (req, res) => {
     try {
         const { key } = req.params;
         const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id })
-            .populate({ path: 'examId', populate: [{ path: 'courseId', select: 'name code' }, { path: 'collegeId', select: 'name' }] });
+            .populate({ path: 'examId', populate: [{ path: 'courseId', select: 'name code' }, { path: 'collegeId', select: 'name' }] })
+            .lean();
 
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid exam key or not authorized' });
 
         // Find all active keys for this exam by this trainer
-        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId?._id, trainerId: req.user._id, isActive: true });
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId?._id, trainerId: req.user._id, isActive: true })
+            .select('uniqueKey')
+            .lean();
         const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
 
         // Get attempts for all these keys (sessions)
         const attempts = await StudentAttempt.find({ sessionId: { $in: keyIds } })
-            .select('studentDetails status totalScore percentage result startedAt completedAt violations');
+            .select('studentDetails status totalScore percentage result startedAt completedAt violations')
+            .lean();
 
         const ChatMessage = require('../models/ChatMessage');
-        const chatMessages = await ChatMessage.find({ examKey: { $in: [keyDoc.uniqueKey, ...allKeys.map(k => k.uniqueKey)] } })
-            .sort({ createdAt: 1 })
-            .limit(200)
-            .lean();
+        const keysList = [keyDoc.uniqueKey, ...allKeys.map(k => k.uniqueKey)];
+
+        const clientChatCount = req.query.chatCount !== undefined ? parseInt(req.query.chatCount, 10) : null;
+        let chatMessages = undefined;
+
+        // Perform a fast count check
+        const currentChatCount = await ChatMessage.countDocuments({ examKey: { $in: keysList } });
+        if (clientChatCount === null || currentChatCount !== clientChatCount) {
+            chatMessages = await ChatMessage.find({ examKey: { $in: keysList } })
+                .sort({ createdAt: 1 })
+                .limit(200)
+                .lean();
+        }
 
         res.json({
             success: true,
@@ -229,16 +242,18 @@ exports.getWaitingRoom = async (req, res) => {
                     completedAt: a.completedAt,
                     violations: (a.violations?.tabSwitches || 0) + (a.violations?.fullScreenExits || 0) + (a.violations?.copyAttempts || 0)
                 })),
-                chatMessages: chatMessages.map(m => ({
-                    id: m._id,
-                    examKey: m.examKey,
-                    senderRole: m.senderRole,
-                    senderName: m.senderName,
-                    senderId: m.senderId,
-                    message: m.message,
-                    recipientId: m.recipientId,
-                    timestamp: m.createdAt
-                }))
+                ...(chatMessages !== undefined ? {
+                    chatMessages: chatMessages.map(m => ({
+                        id: m._id,
+                        examKey: m.examKey,
+                        senderRole: m.senderRole,
+                        senderName: m.senderName,
+                        senderId: m.senderId,
+                        message: m.message,
+                        recipientId: m.recipientId,
+                        timestamp: m.createdAt
+                    }))
+                } : {})
             }
         });
     } catch (error) {
