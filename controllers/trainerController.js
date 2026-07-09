@@ -480,6 +480,9 @@ exports.forceSubmitSession = async (req, res) => {
             }
 
             let totalScore = 0;
+            const enableNeg = attempt.examId?.settings?.enableNegativeMarking;
+            const negValue = attempt.examId?.settings?.negativeMarkValue || 0;
+
             attempt.answers.forEach(a => {
                 const question = attemptQuestions.find(qu => qu._id.toString() === a.questionId.toString());
                 if (question) {
@@ -508,13 +511,19 @@ exports.forceSubmitSession = async (req, res) => {
                         a.marksObtained = question.points || 1;
                         totalScore += question.points || 1;
                     } else {
-                        a.marksObtained = 0;
+                        const hasAnswered = ans !== undefined && ans !== null && ans !== '' && (!Array.isArray(ans) || ans.filter(v => v !== null && v !== undefined && v !== '').length > 0);
+                        if (enableNeg && hasAnswered) {
+                            a.marksObtained = -negValue;
+                            totalScore -= negValue;
+                        } else {
+                            a.marksObtained = 0;
+                        }
                     }
                 }
             });
 
             const maxScore = attempt.examId.totalMarks || attemptQuestions.reduce((acc, q) => acc + q.points, 0) || 1;
-            attempt.totalScore = totalScore;
+            attempt.totalScore = Math.max(0, totalScore);
             attempt.percentage = (totalScore / maxScore) * 100;
             attempt.result = attempt.percentage >= (attempt.examId.passingPercentage || 40) ? 'pass' : 'fail';
             attempt.status = 'completed';

@@ -6,6 +6,8 @@ const Student = require('../models/Student');
 const Batch = require('../models/Batch');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
+const nodemailer = require('nodemailer');
+
 
 const checkAndAutoEndSession = async (sessionId, io) => {
     if (!sessionId) return;
@@ -100,7 +102,7 @@ exports.getExamByEntryKey = async (req, res) => {
         }
 
         // Fetch questions
-        const questions = await Question.find({ examId: exam._id }).sort({ order: 1 });
+        const questions = await Question.find({ examId: exam._id }).sort({ sectionIndex: 1, order: 1 });
 
         // Check if there's an existing attempt
         let existingAnswers = {};
@@ -122,7 +124,7 @@ exports.getExamByEntryKey = async (req, res) => {
                 const parsedIds = attempt.assignedQuestions.map(id => id.toString());
                 questionsForReview = parsedIds.map(id => unordered.find(q => q._id.toString() === id)).filter(Boolean);
             } else {
-                questionsForReview = await Question.find({ examId: exam._id }).sort({ order: 1 });
+                questionsForReview = await Question.find({ examId: exam._id }).sort({ sectionIndex: 1, order: 1 });
             }
             const reviewData = questionsForReview.map(q => {
                 const studentAnswer = attempt.answers.find(a => a.questionId.toString() === q._id.toString());
@@ -134,6 +136,7 @@ exports.getExamByEntryKey = async (req, res) => {
                     text: q.text,
                     type: q.type,
                     points: q.points,
+                    sectionIndex: q.sectionIndex || 0,
                     imageUrl: q.imageUrl,
                     options: q.options?.choices?.map(c => c.text) || [],
                     correctAnswer,
@@ -157,6 +160,7 @@ exports.getExamByEntryKey = async (req, res) => {
                     attemptId: attempt._id,
                     enableCertificate: exam.settings?.enableCertificate || false,
                     settings: exam.settings || {},
+                    sections: exam.sections || [],
                     review: reviewData
                 }
             });
@@ -186,6 +190,7 @@ exports.getExamByEntryKey = async (req, res) => {
             text: q.text,
             type: q.type,
             points: q.points,
+            sectionIndex: q.sectionIndex || 0,
             options: q.options?.choices?.map(c => c.text) || [],
             codingDetails: q.type === 'coding' ? {
                 language: q.codingDetails?.language,
@@ -207,6 +212,7 @@ exports.getExamByEntryKey = async (req, res) => {
                     department: exam.department,
                     course: exam.courseId?.name,
                     settings: exam.settings,
+                    sections: exam.sections || [],
                     enableCertificate: exam.settings?.enableCertificate || false,
                     scheduledDate: exam.scheduledDate,
                     expiryDate: exam.expiryDate,
@@ -394,22 +400,41 @@ exports.startAttempt = async (req, res) => {
             let assignedQuestions = [];
 
             if (exam) {
-                if (exam.settings?.randomizeQuestions && exam.settings?.randomQuestionCount > 0) {
-                    const allQuestions = await Question.find({ examId }).select('_id');
-                    // Fisher-Yates shuffle
-                    for (let i = allQuestions.length - 1; i > 0; i--) {
-                        const j = Math.floor(Math.random() * (i + 1));
-                        [allQuestions[i], allQuestions[j]] = [allQuestions[j], allQuestions[i]];
+                if (exam.settings?.enableSections && exam.sections?.length > 0) {
+                    const allQuestions = await Question.find({ examId });
+                    let groupedQs = [];
+                    const secCount = exam.sections.length;
+                    for (let sIdx = 0; sIdx < secCount; sIdx++) {
+                        const secQs = allQuestions.filter(q => (q.sectionIndex || 0) === sIdx);
+                        if (exam.settings?.randomizeQuestions || exam.settings?.shuffleQuestions) {
+                            for (let i = secQs.length - 1; i > 0; i--) {
+                                const j = Math.floor(Math.random() * (i + 1));
+                                [secQs[i], secQs[j]] = [secQs[j], secQs[i]];
+                            }
+                        }
+                        groupedQs = groupedQs.concat(secQs);
                     }
-                    assignedQuestions = allQuestions.slice(0, exam.settings.randomQuestionCount).map(q => q._id);
-                } else if (exam.settings?.shuffleQuestions) {
-                    const allQuestions = await Question.find({ examId }).select('_id');
-                    // Fisher-Yates shuffle
-                    for (let i = allQuestions.length - 1; i > 0; i--) {
-                        const j = Math.floor(Math.random() * (i + 1));
-                        [allQuestions[i], allQuestions[j]] = [allQuestions[j], allQuestions[i]];
+                    if (exam.settings?.randomizeQuestions && exam.settings?.randomQuestionCount > 0) {
+                        assignedQuestions = groupedQs.slice(0, exam.settings.randomQuestionCount).map(q => q._id);
+                    } else {
+                        assignedQuestions = groupedQs.map(q => q._id);
                     }
-                    assignedQuestions = allQuestions.map(q => q._id);
+                } else {
+                    if (exam.settings?.randomizeQuestions && exam.settings?.randomQuestionCount > 0) {
+                        const allQuestions = await Question.find({ examId }).select('_id');
+                        for (let i = allQuestions.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [allQuestions[i], allQuestions[j]] = [allQuestions[j], allQuestions[i]];
+                        }
+                        assignedQuestions = allQuestions.slice(0, exam.settings.randomQuestionCount).map(q => q._id);
+                    } else if (exam.settings?.shuffleQuestions) {
+                        const allQuestions = await Question.find({ examId }).select('_id');
+                        for (let i = allQuestions.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [allQuestions[i], allQuestions[j]] = [allQuestions[j], allQuestions[i]];
+                        }
+                        assignedQuestions = allQuestions.map(q => q._id);
+                    }
                 }
             }
 
@@ -468,6 +493,7 @@ exports.startAttempt = async (req, res) => {
                 text: q.text,
                 type: q.type,
                 points: q.points,
+                sectionIndex: q.sectionIndex || 0,
                 options: q.options?.choices?.map(c => c.text) || [],
                 codingDetails: q.type === 'coding' ? {
                     language: q.codingDetails?.language,
@@ -604,9 +630,11 @@ exports.submitExamAttempt = async (req, res) => {
             const parsedIds = attempt.assignedQuestions.map(id => id.toString());
             questions = parsedIds.map(id => unordered.find(q => q._id.toString() === id)).filter(Boolean);
         } else {
-            questions = await Question.find({ examId: attempt.examId._id }).sort({ order: 1 });
+            questions = await Question.find({ examId: attempt.examId._id }).sort({ sectionIndex: 1, order: 1 });
         }
         let totalScore = 0;
+        const enableNeg = attempt.examId?.settings?.enableNegativeMarking;
+        const negValue = attempt.examId?.settings?.negativeMarkValue || 0;
 
         const processedQuestionIds = new Set();
         attempt.answers.forEach(a => {
@@ -646,12 +674,18 @@ exports.submitExamAttempt = async (req, res) => {
                     a.marksObtained = question.points || 1;
                     totalScore += question.points || 1;
                 } else {
-                    a.marksObtained = 0;
+                    const hasAnswered = ans !== undefined && ans !== null && ans !== '' && (!Array.isArray(ans) || ans.filter(v => v !== null && v !== undefined && v !== '').length > 0);
+                    if (enableNeg && hasAnswered) {
+                        a.marksObtained = -negValue;
+                        totalScore -= negValue;
+                    } else {
+                        a.marksObtained = 0;
+                    }
                 }
             }
         });
 
-        attempt.totalScore = totalScore;
+        attempt.totalScore = Math.max(0, totalScore);
         const maxScore = attempt.examId.totalMarks || questions.reduce((acc, q) => acc + q.points, 0) || 1;
         attempt.percentage = (totalScore / maxScore) * 100;
         attempt.result = attempt.percentage >= (attempt.examId.passingPercentage || 40) ? 'pass' : 'fail';
@@ -660,6 +694,144 @@ exports.submitExamAttempt = async (req, res) => {
         if (violations) attempt.violations = violations;
 
         await attempt.save();
+
+        // Send Brevo Email asynchronously to not block response
+        if (attempt.studentDetails && attempt.studentDetails.email) {
+            (async () => {
+                try {
+                    const correctMarksSum = attempt.answers.reduce((sum, a) => {
+                        if (!a.isCorrect) return sum;
+                        const q = questions.find(qu => qu._id.toString() === a.questionId.toString());
+                        return sum + (q?.points || 1);
+                    }, 0);
+                    const penaltyValue = attempt.examId.settings?.negativeMarkValue || 0.25;
+                    const incorrectCount = attempt.answers.filter(a => !a.isCorrect && a.answer && (Array.isArray(a.answer) ? a.answer.some(v => v) : a.answer)).length;
+                    const rawPenalty = incorrectCount * penaltyValue;
+
+                    const isPassedText = attempt.result === 'pass' ? 'PASSED ✅' : 'NOT PASSED ❌';
+                    const passedColor = attempt.result === 'pass' ? '#10b981' : '#ef4444';
+
+                    const emailSubject = `Assessment Results: ${attempt.examId.title}`;
+                    
+                    const htmlEmail = `
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <meta charset="utf-8">
+                            <title>Assessment Results</title>
+                            <style>
+                                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 0; margin: 0; background-color: #f8fafc; color: #1e293b; }
+                                .wrapper { max-width: 600px; margin: 20px auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+                                .header { background-color: #0f172a; padding: 35px 20px; text-align: center; color: white; }
+                                .header h1 { font-size: 22px; font-weight: 800; margin: 0; letter-spacing: -0.02em; }
+                                .header p { font-size: 11px; text-transform: uppercase; color: #004AAD; font-weight: bold; letter-spacing: 0.15em; margin: 8px 0 0 0; }
+                                
+                                .content { padding: 30px; }
+                                .salutation { font-size: 16px; font-weight: 600; color: #0f172a; margin-top: 0; }
+                                .intro { font-size: 14px; color: #475569; line-height: 1.6; margin-bottom: 25px; }
+                                
+                                .section-title { font-size: 11px; font-weight: 750; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; margin: 25px 0 15px 0; }
+                                
+                                .info-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+                                .info-table td { padding: 8px 0; font-size: 13px; vertical-align: top; }
+                                .info-lbl { font-weight: bold; color: #94a3b8; width: 35%; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; }
+                                .info-val { font-weight: 600; color: #334155; }
+                                
+                                .score-box { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: white; border-radius: 12px; padding: 25px; text-align: center; margin-bottom: 25px; }
+                                .score-lbl { font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 5px 0; }
+                                .score-val { font-size: 44px; font-weight: 900; color: #ffffff; line-height: 1; margin: 0; }
+                                .score-status { display: inline-block; padding: 6px 14px; border-radius: 8px; font-size: 11px; font-weight: 700; margin-top: 15px; border: 1px solid ${passedColor}4d; background-color: ${passedColor}1a; color: ${passedColor}; }
+                                
+                                .footer { background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px; text-align: center; font-size: 11px; color: #94a3b8; font-weight: 500; }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="wrapper">
+                                <div class="header">
+                                    <h1>Assessment Result Sheet</h1>
+                                    <p>Ethnotech Academy Assessment Portal</p>
+                                </div>
+                                <div class="content">
+                                    <p class="salutation">Dear ${attempt.studentDetails.name},</p>
+                                    <p class="intro">Congratulations on completing your assessment. Your responses have been processed and evaluated. Below is your detailed result breakdown.</p>
+                                    
+                                    <div class="score-box">
+                                        <p class="score-lbl">Total Score</p>
+                                        <p class="score-val">${attempt.percentage.toFixed(2)}%</p>
+                                        <span class="score-status">${isPassedText}</span>
+                                    </div>
+                                    
+                                    <p class="section-title">Candidate & Assessment Details</p>
+                                    <table class="info-table">
+                                        <tr>
+                                            <td class="info-lbl">Candidate Name</td>
+                                            <td class="info-val">${attempt.studentDetails.name}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="info-lbl">USN / Roll Number</td>
+                                            <td class="info-val">${attempt.studentDetails.rollNumber}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="info-lbl">Course</td>
+                                            <td class="info-val">${attempt.studentDetails.course || 'N/A'}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="info-lbl">Completed At</td>
+                                            <td class="info-val">${new Date(attempt.completedAt).toLocaleString()}</td>
+                                        </tr>
+                                    </table>
+                                    
+                                    <p class="section-title">Marks Breakdown</p>
+                                    <table style="width: 100%; border-collapse: separate; border-spacing: 10px 0;">
+                                        <tr>
+                                            <td style="width: 33.33%; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 15px; text-align: center;">
+                                                <p style="font-size: 9px; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin: 0 0 5px 0;">Gross Marks</p>
+                                                <p style="font-size: 18px; font-weight: 800; color: #10b981; margin: 0;">+${correctMarksSum} pts</p>
+                                            </td>
+                                            <td style="width: 33.33%; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 15px; text-align: center;">
+                                                <p style="font-size: 9px; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin: 0 0 5px 0;">Penalty Deductions</p>
+                                                <p style="font-size: 18px; font-weight: 800; color: #ef4444; margin: 0;">-${rawPenalty.toFixed(2)} pts</p>
+                                            </td>
+                                            <td style="width: 33.33%; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 15px; text-align: center;">
+                                                <p style="font-size: 9px; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin: 0 0 5px 0;">Final Marks</p>
+                                                <p style="font-size: 18px; font-weight: 800; color: #004AAD; margin: 0;">${attempt.totalScore} / ${maxScore} pts</p>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </div>
+                                <div class="footer">
+                                    <p>© ${new Date().getFullYear()} Ethnotech Academy. All rights reserved.</p>
+                                    <p style="font-size: 9px; color: #94a3b8; margin-top: 5px;">This is an automated report. Please do not reply directly to this email.</p>
+                                </div>
+                            </div>
+                        </body>
+                        </html>
+                    `;
+
+                    let transporter = nodemailer.createTransport({
+                        host: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
+                        port: parseInt(process.env.SMTP_PORT || '587'),
+                        secure: false,
+                        auth: {
+                            user: process.env.SMTP_USER,
+                            pass: process.env.SMTP_PASS
+                        }
+                    });
+
+                    let info = await transporter.sendMail({
+                        from: '"Ethnotech Academy" <narnejaswanth83@gmail.com>',
+                        to: attempt.studentDetails.email.trim(),
+                        subject: emailSubject,
+                        html: htmlEmail
+                    });
+
+                    console.log('Brevo SMTP Email Send Result:', info.messageId);
+                } catch (err) {
+                    console.error('Brevo Email sending failed:', err);
+                }
+            })();
+        }
+
         await checkAndAutoEndSession(attempt.sessionId, req.app.get('socketio'));
 
         // Build per-question review data to send back
@@ -727,9 +899,11 @@ exports.resumeSession = async (req, res) => {
                     const parsedIds = attempt.assignedQuestions.map(id => id.toString());
                     questions = parsedIds.map(id => unordered.find(q => q._id.toString() === id)).filter(Boolean);
                 } else {
-                    questions = await Question.find({ examId: attempt.examId._id }).sort({ order: 1 });
+                    questions = await Question.find({ examId: attempt.examId._id }).sort({ sectionIndex: 1, order: 1 });
                 }
                 let totalScore = 0;
+                const enableNeg = attempt.examId?.settings?.enableNegativeMarking;
+                const negValue = attempt.examId?.settings?.negativeMarkValue || 0;
                 
                 const processedQuestionIds = new Set();
                 attempt.answers.forEach(a => {
@@ -769,12 +943,18 @@ exports.resumeSession = async (req, res) => {
                             a.marksObtained = question.points || 1;
                             totalScore += question.points || 1;
                         } else {
-                            a.marksObtained = 0;
+                            const hasAnswered = ans !== undefined && ans !== null && ans !== '' && (!Array.isArray(ans) || ans.filter(v => v !== null && v !== undefined && v !== '').length > 0);
+                            if (enableNeg && hasAnswered) {
+                                a.marksObtained = -negValue;
+                                totalScore -= negValue;
+                            } else {
+                                a.marksObtained = 0;
+                            }
                         }
                     }
                 });
 
-                attempt.totalScore = totalScore;
+                attempt.totalScore = Math.max(0, totalScore);
                 const maxScore = attempt.examId.totalMarks || questions.reduce((acc, q) => acc + q.points, 0) || 1;
                 attempt.percentage = (totalScore / maxScore) * 100;
                 attempt.result = attempt.percentage >= (attempt.examId.passingPercentage || 40) ? 'pass' : 'fail';

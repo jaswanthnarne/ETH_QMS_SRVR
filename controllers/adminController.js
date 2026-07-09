@@ -895,6 +895,7 @@ exports.createExam = async (req, res) => {
             batches: batches || [],
             scheduledDate: req.body.scheduledDate || Date.now(),
             expiryDate: req.body.expiryDate || null,
+            sections: req.body.sections || [],
             settings: {
                 ...settings,
                 // Ensure defaults for critical fields if not provided
@@ -906,9 +907,14 @@ exports.createExam = async (req, res) => {
                 collectDepartment: settings?.collectDepartment ?? true,
                 enableCertificate: settings?.enableCertificate ?? false,
                 enableSections: settings?.enableSections ?? false,
+                enableNegativeMarking: settings?.enableNegativeMarking ?? false,
+                negativeMarkValue: settings?.negativeMarkValue ?? 0.25,
                 requireWebcam: settings?.requireWebcam ?? false,
                 requireMic: settings?.requireMic ?? false,
-                requireScreenshare: settings?.requireScreenshare ?? false
+                requireScreenshare: settings?.requireScreenshare ?? false,
+                allowDownloadMarksheet: settings?.allowDownloadMarksheet ?? true,
+                allowDownloadResponseMatrix: settings?.allowDownloadResponseMatrix ?? true,
+                allowDownloadQuestionPaper: settings?.allowDownloadQuestionPaper ?? true
             },
             createdBy: req.user._id
         });
@@ -948,6 +954,7 @@ exports.createExam = async (req, res) => {
                     text: q.text,
                     points: q.marks || 1,
                     order: index,
+                    sectionIndex: q.sectionIndex || 0,
                     correctAnswerText,
                     options: { choices }
                 };
@@ -1025,6 +1032,7 @@ exports.updateExam = async (req, res) => {
         exam.instructions = payload.instructions;
         exam.scheduledDate = payload.scheduledDate || exam.scheduledDate;
         exam.expiryDate = payload.expiryDate || null;
+        exam.sections = payload.sections || [];
         if (payload.settings) {
             exam.settings = { ...exam.settings.toObject(), ...payload.settings };
             exam.markModified('settings');
@@ -1090,6 +1098,7 @@ exports.updateExam = async (req, res) => {
                     text: q.text,
                     points: q.marks || 1,
                     order: index,
+                    sectionIndex: q.sectionIndex || 0,
                     correctAnswerText,
                     options: { choices }
                 };
@@ -1170,6 +1179,7 @@ exports.bulkImportQuestions = async (req, res) => {
             const correctAnswer = row.getCell(7).value?.toString()?.trim();
             const marks = parseFloat(row.getCell(8).value) || 1;
             const difficulty = row.getCell(9).value?.toString()?.trim()?.toLowerCase() || 'medium';
+            const sectionName = row.getCell(10).value?.toString()?.trim() || 'General';
 
             // Skip entirely blank trailing rows silently
             if (!text && !correctAnswer && !optA && !optB) {
@@ -1275,6 +1285,17 @@ exports.bulkImportQuestions = async (req, res) => {
                 correctAnswerText = correctAnswer;
             }
 
+            // Map sectionName to a sectionIndex (0-based)
+            let sectionIndex = 0;
+            if (exam.sections) {
+                let sIdx = exam.sections.findIndex(s => s.name.toLowerCase() === sectionName.toLowerCase());
+                if (sIdx === -1) {
+                    exam.sections.push({ name: sectionName, description: `${sectionName} Section`, order: exam.sections.length });
+                    sIdx = exam.sections.length - 1;
+                }
+                sectionIndex = sIdx;
+            }
+
             questions.push({
                 examId,
                 type: normalizedType,
@@ -1284,6 +1305,7 @@ exports.bulkImportQuestions = async (req, res) => {
                     difficulty: ['easy','medium','hard'].includes(difficulty) ? difficulty : 'medium'
                 },
                 order: questionOrder++,
+                sectionIndex,
                 correctAnswerText,
                 options: { choices }
             });
@@ -1338,6 +1360,7 @@ exports.parseQuestionsExcel = async (req, res) => {
             const correctAnswer = row.getCell(7).value?.toString()?.trim();
             const marks = parseFloat(row.getCell(8).value) || 5; // Default marks to 5 in frontend
             const difficulty = row.getCell(9).value?.toString()?.trim()?.toLowerCase() || 'medium';
+            const sectionName = row.getCell(10).value?.toString()?.trim() || 'General';
 
             // Skip entirely blank trailing rows silently
             if (!text && !correctAnswer && !optA && !optB) {
@@ -1450,7 +1473,8 @@ exports.parseQuestionsExcel = async (req, res) => {
                 options: normalizedType === 'true_false' ? ['True', 'False'] : (normalizedType === 'fill_blank' || normalizedType === 'numeric' ? [] : allOptions),
                 correctAnswer: normalizedType === 'multiple_correct' ? '' : (normalizedType === 'single_correct' || normalizedType === 'true_false' ? (choices.find(c => c.isCorrect)?.text || '') : correctAnswerText),
                 correctAnswers: normalizedType === 'multiple_correct' ? choices.filter(c => c.isCorrect).map(c => c.text) : [],
-                marks: marks
+                marks: marks,
+                sectionName: sectionName
             });
         });
 

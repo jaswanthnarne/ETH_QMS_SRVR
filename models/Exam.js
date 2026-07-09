@@ -68,11 +68,16 @@ const examSchema = new mongoose.Schema({
         collectDepartment: { type: Boolean, default: true },
         enableCertificate: { type: Boolean, default: false },
         enableSections: { type: Boolean, default: false },
+        enableNegativeMarking: { type: Boolean, default: false },
+        negativeMarkValue: { type: Number, default: 0.25 },
         randomizeQuestions: { type: Boolean, default: false },
         randomQuestionCount: { type: Number, default: 0 },
         requireWebcam: { type: Boolean, default: false },
         requireMic: { type: Boolean, default: false },
-        requireScreenshare: { type: Boolean, default: false }
+        requireScreenshare: { type: Boolean, default: false },
+        allowDownloadMarksheet: { type: Boolean, default: true },
+        allowDownloadResponseMatrix: { type: Boolean, default: true },
+        allowDownloadQuestionPaper: { type: Boolean, default: true }
     },
     sections: [{
         name: { type: String, required: true },

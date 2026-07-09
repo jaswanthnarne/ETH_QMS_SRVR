@@ -1730,6 +1730,110 @@ exports.exportMasterSheet = async (req, res) => {
                 }
             });
 
+            // ─── SHEET 2.5: Section-wise Marks ───
+            const sectionSheet = workbook.addWorksheet('🎯 Section Marks');
+            const examSections = [];
+            if (exam.sections && exam.sections.length > 0) {
+                exam.sections.forEach((sec, sIdx) => {
+                    examSections.push({
+                        index: sIdx,
+                        name: sec.name || `Section ${sIdx + 1}`
+                    });
+                });
+            } else {
+                examSections.push({
+                    index: 0,
+                    name: 'General'
+                });
+            }
+
+            questions.forEach(q => {
+                const qSecIdx = q.sectionIndex || 0;
+                if (!examSections.some(s => s.index === qSecIdx)) {
+                    examSections.push({
+                        index: qSecIdx,
+                        name: `Section ${qSecIdx + 1}`
+                    });
+                }
+            });
+            examSections.sort((a, b) => a.index - b.index);
+
+            const sectionColumns = [
+                { key: 'name', width: 24 },
+                { key: 'roll', width: 18 }
+            ];
+            examSections.forEach(sec => {
+                sectionColumns.push({
+                    key: `sec_${sec.index}`,
+                    width: 22
+                });
+            });
+            sectionColumns.push({ key: 'totalScore', width: 15 });
+            sectionColumns.push({ key: 'percentage', width: 15 });
+            sectionColumns.push({ key: 'result', width: 12 });
+            sectionSheet.columns = sectionColumns;
+
+            writeCommonDetailsHeader(sectionSheet, '🎯 Section Marks', 'FF0F766E');
+
+            const sectionHeaders = ['Student Name', 'USN / Roll Number'];
+            examSections.forEach(sec => {
+                sectionHeaders.push(sec.name);
+            });
+            sectionHeaders.push('Total Score', 'Percentage Score', 'Pass / Fail');
+
+            const sectionHeaderRow = sectionSheet.getRow(8);
+            sectionHeaders.forEach((hdr, hIdx) => {
+                const cell = sectionHeaderRow.getCell(hIdx + 1);
+                cell.value = hdr;
+                cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Inter' };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
+                cell.alignment = { vertical: 'middle', horizontal: 'center' };
+                cell.border = {
+                    top: { style: 'thin', color: { argb: 'FF115E59' } },
+                    bottom: { style: 'thin', color: { argb: 'FF115E59' } },
+                    left: { style: 'thin', color: { argb: 'FF115E59' } },
+                    right: { style: 'thin', color: { argb: 'FF115E59' } }
+                };
+            });
+            sectionHeaderRow.height = 24;
+
+            attempts.forEach((a, index) => {
+                const sectionScores = {};
+                examSections.forEach(sec => {
+                    sectionScores[`sec_${sec.index}`] = 0;
+                });
+
+                a.answers?.forEach(ans => {
+                    const q = questions.find(qu => qu._id.toString() === ans.questionId?.toString());
+                    if (q) {
+                        const qSecIdx = q.sectionIndex || 0;
+                        sectionScores[`sec_${qSecIdx}`] = (sectionScores[`sec_${qSecIdx}`] || 0) + (ans.marksObtained || 0);
+                    }
+                });
+
+                const rowData = {
+                    name: a.studentDetails?.name || '—',
+                    roll: a.studentDetails?.rollNumber || '—',
+                    ...sectionScores,
+                    totalScore: `${a.totalScore || 0} / ${exam.totalMarks}`,
+                    percentage: `${(a.percentage || 0).toFixed(2)}%`,
+                    result: (a.result || 'pending').toUpperCase()
+                };
+
+                const row = sectionSheet.addRow(rowData);
+                styleDataRow(row, index % 2 === 0);
+                row.height = 22;
+
+                const resultCell = row.getCell('result');
+                if (a.result === 'pass') {
+                    resultCell.font = { bold: true, color: { argb: 'FF166534' } };
+                    resultCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
+                } else if (a.result === 'fail') {
+                    resultCell.font = { bold: true, color: { argb: 'FF991B1B' } };
+                    resultCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+                }
+            });
+
             // ─── SHEET 3: Response Matrix ───
             const responseSheet = workbook.addWorksheet('📝 Response Matrix');
             const respColumns = [

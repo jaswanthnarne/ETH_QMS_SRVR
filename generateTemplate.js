@@ -21,6 +21,7 @@ async function generate() {
         { header: 'Correct Answer *', key: 'correct', width: 30 },
         { header: 'Marks', key: 'marks', width: 10 },
         { header: 'Difficulty', key: 'difficulty', width: 15 },
+        { header: 'Section Name', key: 'sectionName', width: 20 },
     ];
 
     // Style header
@@ -33,11 +34,11 @@ async function generate() {
 
     // Add example rows
     const examples = [
-        ['What is the capital of India?', 'single_correct', 'Mumbai', 'Delhi', 'Chennai', 'Kolkata', 'Delhi', 2, 'easy'],
-        ['Which of the following are programming languages?', 'multiple_correct', 'Python', 'Java', 'HTML', 'English', 'Python,Java', 3, 'medium'],
-        ['Is the sky blue?', 'true_false', '', '', '', '', 'True', 1, 'easy'],
-        ['The speed of light is ___ km/s.', 'fill_blank', '', '', '', '', '3,00,000', 2, 'hard'],
-        ['What is 2 + 2?', 'numeric', '', '', '', '', '4', 1, 'easy'],
+        ['What is the capital of India?', 'single_correct', 'Mumbai', 'Delhi', 'Chennai', 'Kolkata', 'Delhi', 2, 'easy', 'General'],
+        ['Which of the following are programming languages?', 'multiple_correct', 'Python', 'Java', 'HTML', 'English', 'Python,Java', 3, 'medium', 'General'],
+        ['Is the sky blue?', 'true_false', '', '', '', '', 'True', 1, 'easy', 'GK'],
+        ['The speed of light is ___ km/s.', 'fill_blank', '', '', '', '', '3,00,000', 2, 'hard', 'Physics'],
+        ['What is 2 + 2?', 'numeric', '', '', '', '', '4', 1, 'easy', 'Maths'],
     ];
 
     examples.forEach((row, i) => {
@@ -60,6 +61,7 @@ async function generate() {
         ['Correct Answer', 'For single_correct/true_false: the exact text of the correct option.\nFor multiple_correct: comma-separated correct options (e.g. "Python,Java").\nFor fill_blank/numeric: the correct answer value.'],
         ['Marks', 'Points for this question. Default: 1'],
         ['Difficulty', 'One of: easy, medium, hard. Default: medium'],
+        ['Section Name', 'Name of the section this question belongs to (e.g., "XYZ topic", "ABC topic"). Default: General'],
     ];
 
     instructions.forEach((row, i) => {
