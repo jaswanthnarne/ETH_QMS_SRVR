@@ -486,6 +486,11 @@ exports.forceSubmitSession = async (req, res) => {
             attempt.answers.forEach(a => {
                 const question = attemptQuestions.find(qu => qu._id.toString() === a.questionId.toString());
                 if (question) {
+                    if (a.isSkipped) {
+                        a.isCorrect = false;
+                        a.marksObtained = 0;
+                        return;
+                    }
                     let isCorrect = false;
                     const ans = a.answer;
                     if (ans !== undefined && ans !== null && ans !== '' && (!Array.isArray(ans) || ans.filter(v => v !== null && v !== undefined && v !== '').length > 0)) {

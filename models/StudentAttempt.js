@@ -38,6 +38,7 @@ const studentAttemptSchema = new mongoose.Schema({
         questionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Question' },
         answer: [String], // Array of IDs or text for fill-blanks
         isCorrect: Boolean,
+        isSkipped: { type: Boolean, default: false },
         marksObtained: Number,
         timeSpent: Number // seconds
     }],

@@ -501,6 +501,11 @@ setInterval(async () => {
  
                      const question = questions.find(q => q._id.toString() === qIdStr);
                      if (question) {
+                         if (a.isSkipped) {
+                             a.isCorrect = false;
+                             a.marksObtained = 0;
+                             return;
+                         }
                          let isCorrect = false;
                          const ans = a.answer;
  

@@ -106,6 +106,7 @@ exports.getExamByEntryKey = async (req, res) => {
 
         // Check if there's an existing attempt
         let existingAnswers = {};
+        let existingSkipped = [];
         let attempt = null;
         if (rollNumber) {
             attempt = await StudentAttempt.findOne({ examId: exam._id, 'studentDetails.rollNumber': rollNumber });
@@ -167,6 +168,9 @@ exports.getExamByEntryKey = async (req, res) => {
         }
         if (attempt) {
             attempt.answers.forEach(a => {
+                if (a.isSkipped) {
+                    existingSkipped.push(a.questionId.toString());
+                }
                 // Restore single-value answers as a string, multi-value as an array
                 const val = a.answer;
                 if (Array.isArray(val) && val.length === 1) {
@@ -222,7 +226,8 @@ exports.getExamByEntryKey = async (req, res) => {
                     isPaused: trainerKey.isPaused
                 },
                 questions: sanitizedQuestions,
-                existingAnswers
+                existingAnswers,
+                existingSkipped
             }
         });
     } catch (error) {
@@ -510,7 +515,7 @@ exports.startAttempt = async (req, res) => {
 
 exports.updateProgress = async (req, res) => {
     try {
-        const { examId, rollNumber, questionId, answer, timeSpent } = req.body;
+        const { examId, rollNumber, questionId, answer, timeSpent, isSkipped } = req.body;
         const answerArr = Array.isArray(answer) ? answer : (answer !== undefined && answer !== null ? [answer] : []);
 
         // Use findOneAndUpdate to handle race conditions and prevent duplicates
@@ -525,6 +530,7 @@ exports.updateProgress = async (req, res) => {
             {
                 $set: {
                     'answers.$.answer': answerArr,
+                    'answers.$.isSkipped': !!isSkipped,
                     ...(timeSpent !== undefined ? { 'answers.$.timeSpent': timeSpent } : {})
                 }
             },
@@ -545,6 +551,7 @@ exports.updateProgress = async (req, res) => {
                         answers: {
                             questionId,
                             answer: answerArr,
+                            isSkipped: !!isSkipped,
                             timeSpent: timeSpent || 0
                         }
                     }
@@ -644,6 +651,11 @@ exports.submitExamAttempt = async (req, res) => {
 
             const question = questions.find(q => q._id.toString() === qIdStr);
             if (question) {
+                if (a.isSkipped) {
+                    a.isCorrect = false;
+                    a.marksObtained = 0;
+                    return;
+                }
                 let isCorrect = false;
                 const ans = a.answer;
 

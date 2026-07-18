@@ -77,7 +77,8 @@ const examSchema = new mongoose.Schema({
         requireScreenshare: { type: Boolean, default: false },
         allowDownloadMarksheet: { type: Boolean, default: true },
         allowDownloadResponseMatrix: { type: Boolean, default: true },
-        allowDownloadQuestionPaper: { type: Boolean, default: true }
+        allowDownloadQuestionPaper: { type: Boolean, default: true },
+        allowSkip: { type: Boolean, default: false }
     },
     sections: [{
         name: { type: String, required: true },
