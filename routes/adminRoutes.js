@@ -173,11 +173,15 @@ const {
     createTHMAssignment,
     getTHMAssignments,
     deleteTHMAssignment,
-    getBatchTHMProgress
+    getBatchTHMProgress,
+    getTHMAssignmentById,
+    updateTHMAssignment
 } = require('../controllers/thmAssignmentController');
 
 router.post('/batches/:batchId/thm-rooms', authorize(...ALL_ADMINS, 'trainer'), createTHMAssignment);
 router.get('/batches/:batchId/thm-rooms', authorize(...ALL_ADMINS, 'trainer'), getTHMAssignments);
+router.get('/batches/:batchId/thm-rooms/:roomId', authorize(...ALL_ADMINS, 'trainer'), getTHMAssignmentById);
+router.put('/batches/:batchId/thm-rooms/:roomId', authorize(...ALL_ADMINS, 'trainer'), updateTHMAssignment);
 router.delete('/batches/:batchId/thm-rooms/:roomId', authorize(...ALL_ADMINS, 'trainer'), deleteTHMAssignment);
 router.get('/batches/:batchId/thm-progress', authorize(...ALL_ADMINS, 'trainer'), getBatchTHMProgress);
 

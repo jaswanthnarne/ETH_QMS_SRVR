@@ -223,4 +223,87 @@ exports.getBatchTHMProgress = async (req, res) => {
     }
 };
 
+// @desc    Get Single Room Details & Student Progress
+// @route   GET /api/admin/batches/:batchId/thm-rooms/:roomId
+// @access  Private (Trainer, Admin)
+exports.getTHMAssignmentById = async (req, res) => {
+    try {
+        const { roomId, batchId } = req.params;
+        const assignment = await THMRoomAssignment.findById(roomId);
+
+        if (!assignment) {
+            return res.status(404).json({ success: false, error: 'Assignment not found.' });
+        }
+
+        // Get students in this batch
+        const students = await Student.find({ batchId }).select('name usn department externalHandles');
+        
+        // Get progress for this specific assignment
+        const progresses = await StudentRoomProgress.find({ assignmentId: roomId });
+        const progressMap = {};
+        progresses.forEach(p => {
+            progressMap[p.studentId.toString()] = p;
+        });
+
+        const studentProgress = students.map(s => {
+            const prog = progressMap[s._id.toString()];
+            return {
+                studentId: s._id,
+                name: s.name,
+                usn: s.usn,
+                department: s.department,
+                tryhackmeHandle: s.externalHandles?.tryhackme || '—',
+                status: prog ? prog.status : 'pending',
+                obtainedMarks: prog ? prog.obtainedMarks : 0,
+                completedAt: prog ? prog.completedAt : null
+            };
+        });
+
+        res.json({
+            success: true,
+            data: {
+                assignment,
+                roster: studentProgress
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// @desc    Update Single Room Details
+// @route   PUT /api/admin/batches/:batchId/thm-rooms/:roomId
+// @access  Private (Trainer, Admin)
+exports.updateTHMAssignment = async (req, res) => {
+    try {
+        const { roomId } = req.params;
+        const { roomNumber, roomCode, title, maxMarks, dueDate } = req.body;
+
+        const assignment = await THMRoomAssignment.findById(roomId);
+        if (!assignment) {
+            return res.status(404).json({ success: false, error: 'Assignment not found.' });
+        }
+
+        if (roomNumber !== undefined) assignment.roomNumber = roomNumber;
+        if (roomCode !== undefined) assignment.roomCode = roomCode;
+        if (title !== undefined) assignment.title = title;
+        if (maxMarks !== undefined) assignment.maxMarks = maxMarks;
+        if (dueDate !== undefined) assignment.dueDate = dueDate;
+
+        await assignment.save();
+
+        // Also update any completed student's marks to match the new maxMarks
+        if (maxMarks !== undefined) {
+            await StudentRoomProgress.updateMany(
+                { assignmentId: roomId, status: 'completed' },
+                { obtainedMarks: maxMarks }
+            );
+        }
+
+        res.json({ success: true, message: 'Assignment updated successfully.', data: assignment });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 exports.syncStudentTHMRooms = syncStudentTHMRooms;
