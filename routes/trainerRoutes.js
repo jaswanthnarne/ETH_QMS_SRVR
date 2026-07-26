@@ -57,11 +57,15 @@ const {
     createTHMAssignment,
     getTHMAssignments,
     deleteTHMAssignment,
-    getBatchTHMProgress
+    getBatchTHMProgress,
+    getTHMAssignmentById,
+    updateTHMAssignment
 } = require('../controllers/thmAssignmentController');
 
 router.post('/batches/:batchId/thm-rooms', createTHMAssignment);
 router.get('/batches/:batchId/thm-rooms', getTHMAssignments);
+router.get('/batches/:batchId/thm-rooms/:roomId', getTHMAssignmentById);
+router.put('/batches/:batchId/thm-rooms/:roomId', updateTHMAssignment);
 router.delete('/batches/:batchId/thm-rooms/:roomId', deleteTHMAssignment);
 router.get('/batches/:batchId/thm-progress', getBatchTHMProgress);
 
