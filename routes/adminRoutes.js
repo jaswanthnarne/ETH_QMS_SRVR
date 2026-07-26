@@ -168,4 +168,17 @@ router.post('/users', authorize('super_admin', 'ops_admin'), createAdminUser);
 router.put('/users/:id', authorize('super_admin', 'ops_admin'), updateAdminUser);
 router.delete('/users/:id', authorize('super_admin', 'ops_admin'), deleteAdminUser);
 
+// TryHackMe Room Assignment Routes
+const { 
+    createTHMAssignment,
+    getTHMAssignments,
+    deleteTHMAssignment,
+    getBatchTHMProgress
+} = require('../controllers/thmAssignmentController');
+
+router.post('/batches/:batchId/thm-rooms', authorize(...ALL_ADMINS, 'trainer'), createTHMAssignment);
+router.get('/batches/:batchId/thm-rooms', authorize(...ALL_ADMINS, 'trainer'), getTHMAssignments);
+router.delete('/batches/:batchId/thm-rooms/:roomId', authorize(...ALL_ADMINS, 'trainer'), deleteTHMAssignment);
+router.get('/batches/:batchId/thm-progress', authorize(...ALL_ADMINS, 'trainer'), getBatchTHMProgress);
+
 module.exports = router;

@@ -119,8 +119,11 @@ exports.getTHMAssignments = async (req, res) => {
         const { batchId } = req.params;
         const assignments = await THMRoomAssignment.find({ batchId }).sort({ roomNumber: 1 });
 
-        if (req.user && req.user.role !== 'trainer') {
-            const progresses = await StudentRoomProgress.find({ studentId: req.user._id });
+        const studentObj = req.user || req.student;
+        const isStudent = req.student || (req.user && req.user.role !== 'trainer');
+
+        if (isStudent && studentObj) {
+            const progresses = await StudentRoomProgress.find({ studentId: studentObj._id });
             const progressMap = {};
             progresses.forEach(p => {
                 progressMap[p.assignmentId.toString()] = p.status;
