@@ -54,7 +54,12 @@ const studentSchema = new mongoose.Schema({
             default: 'Any'
         }
     },
-    resumeUrl: String
+    resumeUrl: String,
+    externalHandles: {
+        leetcode: { type: String, default: null },
+        tryhackme: { type: String, default: null },
+        kaggle: { type: String, default: null }
+    }
 }, {
     timestamps: true
 });

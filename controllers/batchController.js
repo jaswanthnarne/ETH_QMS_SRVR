@@ -46,7 +46,9 @@ exports.createBatch = async (req, res) => {
             collegeId,
             courseId: courseId || undefined,
             batchName: trimmedBatchName,
-            department: department.trim()
+            department: department.trim(),
+            integrationType: req.body.integrationType || undefined,
+            integrationConfig: req.body.integrationConfig || undefined
         });
 
         res.status(201).json({ success: true, data: batch });
@@ -110,7 +112,9 @@ exports.createBatchAdmin = async (req, res) => {
             department: department.trim(),
             program,
             startDate,
-            endDate
+            endDate,
+            integrationType: req.body.integrationType || undefined,
+            integrationConfig: req.body.integrationConfig || undefined
         });
 
         const populated = await Batch.findById(batch._id)
@@ -242,7 +246,7 @@ exports.updateBatch = async (req, res) => {
             return res.status(403).json({ success: false, error: 'Not authorized to update this batch' });
         }
 
-        const { collegeId, courseId, batchName, department, program, startDate, endDate, status, trainerId } = req.body;
+        const { collegeId, courseId, batchName, department, program, startDate, endDate, status, trainerId, integrationType, integrationConfig } = req.body;
 
         if (collegeId && !checkCollegeScope(req.user, collegeId)) {
             return res.status(403).json({ success: false, error: 'Unauthorized: Action out of assigned regional scope' });
@@ -275,6 +279,8 @@ exports.updateBatch = async (req, res) => {
         if (endDate !== undefined) batch.endDate = endDate || undefined;
         if (status) batch.status = status;
         if (trainerId !== undefined) batch.trainerId = trainerId || null;
+        if (integrationType !== undefined) batch.integrationType = integrationType;
+        if (integrationConfig !== undefined) batch.integrationConfig = integrationConfig;
 
         await batch.save();
 

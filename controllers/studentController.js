@@ -616,3 +616,36 @@ exports.resetStudentPassword = async (req, res) => {
     }
 };
 
+// @desc    Update student external platform handles (LeetCode/TryHackMe/Kaggle)
+// @route   PUT /api/students/profile/handles
+// @access  Private (Student)
+exports.updateExternalHandles = async (req, res) => {
+    try {
+        const { leetcode, tryhackme, kaggle } = req.body;
+        const studentId = req.student ? req.student._id : (req.user ? req.user._id : null);
+        if (!studentId) {
+            return res.status(401).json({ success: false, error: 'Not authenticated' });
+        }
+        const student = await Student.findById(studentId);
+
+        if (!student) {
+            return res.status(404).json({ success: false, error: 'Student not found' });
+        }
+
+        if (!student.externalHandles) {
+            student.externalHandles = {};
+        }
+
+        if (leetcode !== undefined) student.externalHandles.leetcode = leetcode || null;
+        if (tryhackme !== undefined) student.externalHandles.tryhackme = tryhackme || null;
+        if (kaggle !== undefined) student.externalHandles.kaggle = kaggle || null;
+
+        await student.save();
+
+        res.json({ success: true, message: 'External handles updated successfully', data: student.externalHandles });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+

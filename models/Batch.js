@@ -38,6 +38,17 @@ const batchSchema = new mongoose.Schema({
     studentCount: {
         type: Number,
         default: 0
+    },
+    integrationType: {
+        type: String,
+        enum: ['none', 'leetcode', 'tryhackme', 'kaggle'],
+        default: 'none'
+    },
+    integrationConfig: {
+        roomCode: String,
+        groupUrl: String,
+        targetScore: Number,
+        lastSynced: Date
     }
 }, {
     timestamps: true
