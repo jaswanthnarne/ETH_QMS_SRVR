@@ -2555,21 +2555,25 @@ exports.getStudentLeaderboard = async (req, res) => {
     }
 };
 
-const axios = require('axios');
 async function syncStudentExternalScore(student, integrationType) {
     if (!student.externalHandles) return;
 
     try {
         if (integrationType === 'tryhackme' && student.externalHandles.tryhackme) {
             const username = student.externalHandles.tryhackme.trim();
-            const response = await axios.get(`https://tryhackme.com/api/user/profile/${username}`, {
+            const response = await fetch(`https://tryhackme.com/api/user/profile/${username}`, {
                 headers: { 'User-Agent': 'Mozilla/5.0' },
-                timeout: 4000
+                signal: AbortSignal.timeout(4000)
             });
-            if (response.data && response.data.points !== undefined) {
-                student.externalScore = response.data.points;
-                student.externalBadges = response.data.badges ? response.data.badges.length : 0;
-                await student.save();
+            if (response.ok) {
+                const data = await response.json();
+                if (data && data.points !== undefined) {
+                    student.externalScore = data.points;
+                    student.externalBadges = data.badges ? data.badges.length : 0;
+                    await student.save();
+                }
+            } else {
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
         } else {
             student.externalScore += Math.floor(Math.random() * 60) + 10;
