@@ -276,7 +276,7 @@ exports.getStudentMe = async (req, res) => {
         let attendanceSummary = {
             totalSessions: 0,
             attended: 0,
-            percentage: 100
+            percentage: 0
         };
 
         if (student.batchId?._id) {
@@ -309,7 +309,7 @@ exports.getStudentMe = async (req, res) => {
             attendanceSummary = {
                 totalSessions: total,
                 attended: attended,
-                percentage: total > 0 ? Math.round((attended / total) * 100) : 100,
+                percentage: total > 0 ? Math.round((attended / total) * 100) : 0,
                 history: history
             };
         }
