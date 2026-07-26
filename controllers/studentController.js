@@ -621,7 +621,7 @@ exports.resetStudentPassword = async (req, res) => {
 // @access  Private (Student)
 exports.updateExternalHandles = async (req, res) => {
     try {
-        const { leetcode, tryhackme, kaggle } = req.body;
+        const { leetcode, tryhackme, hackthebox, kaggle } = req.body;
         const studentId = req.student ? req.student._id : (req.user ? req.user._id : null);
         if (!studentId) {
             return res.status(401).json({ success: false, error: 'Not authenticated' });
@@ -638,6 +638,7 @@ exports.updateExternalHandles = async (req, res) => {
 
         if (leetcode !== undefined) student.externalHandles.leetcode = leetcode || null;
         if (tryhackme !== undefined) student.externalHandles.tryhackme = tryhackme || null;
+        if (hackthebox !== undefined) student.externalHandles.hackthebox = hackthebox || null;
         if (kaggle !== undefined) student.externalHandles.kaggle = kaggle || null;
 
         await student.save();

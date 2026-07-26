@@ -58,7 +58,16 @@ const studentSchema = new mongoose.Schema({
     externalHandles: {
         leetcode: { type: String, default: null },
         tryhackme: { type: String, default: null },
+        hackthebox: { type: String, default: null },
         kaggle: { type: String, default: null }
+    },
+    externalScore: {
+        type: Number,
+        default: 0
+    },
+    externalBadges: {
+        type: Number,
+        default: 0
     }
 }, {
     timestamps: true

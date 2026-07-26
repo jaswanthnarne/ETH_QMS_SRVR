@@ -22,6 +22,8 @@ const {
 } = require('../controllers/studentAuthController');
 const { updateExternalHandles } = require('../controllers/studentController');
 
+const { getStudentLeaderboard } = require('../controllers/analyticsController');
+
 router.post('/login', loginStudent);
 router.post('/setup-password', setupStudentPassword);
 
@@ -34,6 +36,7 @@ router.put('/profile/handles', updateExternalHandles);
 router.post('/resume', upload.single('resume'), uploadStudentResume);
 router.get('/attempts', getStudentAttempts);
 router.get('/active-exams', getStudentActiveExams);
+router.get('/leaderboard', getStudentLeaderboard);
 
 // Todo routes
 router.get('/todos', getStudentTodos);
