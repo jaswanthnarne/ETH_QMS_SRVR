@@ -2560,30 +2560,25 @@ async function syncStudentExternalScore(student, integrationType) {
 
     try {
         if (integrationType === 'tryhackme' && student.externalHandles.tryhackme) {
-            const username = student.externalHandles.tryhackme.trim();
-            const response = await fetch(`https://tryhackme.com/api/user/profile/${username}`, {
-                headers: { 'User-Agent': 'Mozilla/5.0' },
+            const { syncStudentTHMRooms } = require('./thmAssignmentController');
+            const batchId = student.batchId._id || student.batchId;
+            await syncStudentTHMRooms(student, batchId);
+        } else if (integrationType === 'leetcode' && student.externalHandles.leetcode) {
+            const username = student.externalHandles.leetcode.trim();
+            const response = await fetch(`https://leetcode-api-faisalshohag.vercel.app/${username}`, {
                 signal: AbortSignal.timeout(4000)
             });
             if (response.ok) {
                 const data = await response.json();
-                if (data && data.points !== undefined) {
-                    student.externalScore = data.points;
-                    student.externalBadges = data.badges ? data.badges.length : 0;
+                if (data && data.matchedUser) {
+                    const submissionNum = data.matchedUser.submitStats.acSubmissionNum;
+                    const totalSolved = submissionNum.find(x => x.difficulty === 'All')?.count || 0;
+                    student.externalScore = totalSolved;
                     await student.save();
                 }
-            } else {
-                throw new Error(`HTTP error! status: ${response.status}`);
             }
-        } else {
-            student.externalScore += Math.floor(Math.random() * 60) + 10;
-            student.externalBadges += Math.random() > 0.75 ? 1 : 0;
-            await student.save();
         }
     } catch (err) {
         console.error(`Failed to sync external score for ${student.name} (${integrationType}):`, err.message);
-        student.externalScore += Math.floor(Math.random() * 40) + 5;
-        student.externalBadges += Math.random() > 0.85 ? 1 : 0;
-        await student.save();
     }
 }

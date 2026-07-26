@@ -52,4 +52,17 @@ router.delete('/logs/:id', deleteLog);
 const { getBatches } = require('../controllers/batchController');
 router.get('/batches', getBatches);
 
+// TryHackMe Room Assignment Routes
+const { 
+    createTHMAssignment,
+    getTHMAssignments,
+    deleteTHMAssignment,
+    getBatchTHMProgress
+} = require('../controllers/thmAssignmentController');
+
+router.post('/batches/:batchId/thm-rooms', createTHMAssignment);
+router.get('/batches/:batchId/thm-rooms', getTHMAssignments);
+router.delete('/batches/:batchId/thm-rooms/:roomId', deleteTHMAssignment);
+router.get('/batches/:batchId/thm-progress', getBatchTHMProgress);
+
 module.exports = router;
