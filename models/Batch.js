@@ -41,7 +41,7 @@ const batchSchema = new mongoose.Schema({
     },
     integrationType: {
         type: String,
-        enum: ['none', 'leetcode', 'tryhackme', 'kaggle'],
+        enum: ['none', 'leetcode', 'kaggle'],
         default: 'none'
     },
     integrationConfig: {

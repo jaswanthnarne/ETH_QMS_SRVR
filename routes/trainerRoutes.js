@@ -51,22 +51,4 @@ router.delete('/logs/:id', deleteLog);
 // Trainer Batches CRUD Routes
 const { getBatches } = require('../controllers/batchController');
 router.get('/batches', getBatches);
-
-// TryHackMe Room Assignment Routes
-const { 
-    createTHMAssignment,
-    getTHMAssignments,
-    deleteTHMAssignment,
-    getBatchTHMProgress,
-    getTHMAssignmentById,
-    updateTHMAssignment
-} = require('../controllers/thmAssignmentController');
-
-router.post('/batches/:batchId/thm-rooms', createTHMAssignment);
-router.get('/batches/:batchId/thm-rooms', getTHMAssignments);
-router.get('/batches/:batchId/thm-rooms/:roomId', getTHMAssignmentById);
-router.put('/batches/:batchId/thm-rooms/:roomId', updateTHMAssignment);
-router.delete('/batches/:batchId/thm-rooms/:roomId', deleteTHMAssignment);
-router.get('/batches/:batchId/thm-progress', getBatchTHMProgress);
-
 module.exports = router;

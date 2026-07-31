@@ -57,8 +57,6 @@ const studentSchema = new mongoose.Schema({
     resumeUrl: String,
     externalHandles: {
         leetcode: { type: String, default: null },
-        tryhackme: { type: String, default: null },
-        hackthebox: { type: String, default: null },
         kaggle: { type: String, default: null }
     },
     externalScore: {

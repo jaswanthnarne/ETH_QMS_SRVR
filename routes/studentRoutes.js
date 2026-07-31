@@ -43,12 +43,4 @@ router.get('/todos', getStudentTodos);
 router.post('/todos', createStudentTodo);
 router.put('/todos/:id', updateStudentTodo);
 router.delete('/todos/:id', deleteStudentTodoPermanently);
-
-// TryHackMe Room Assignment route
-const { getTHMAssignments } = require('../controllers/thmAssignmentController');
-router.get('/thm-rooms', (req, res, next) => {
-    req.params.batchId = req.student.batchId?._id || req.student.batchId;
-    next();
-}, getTHMAssignments);
-
 module.exports = router;

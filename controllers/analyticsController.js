@@ -2559,11 +2559,7 @@ async function syncStudentExternalScore(student, integrationType) {
     if (!student.externalHandles) return;
 
     try {
-        if (integrationType === 'tryhackme' && student.externalHandles.tryhackme) {
-            const { syncStudentTHMRooms } = require('./thmAssignmentController');
-            const batchId = student.batchId._id || student.batchId;
-            await syncStudentTHMRooms(student, batchId);
-        } else if (integrationType === 'leetcode' && student.externalHandles.leetcode) {
+        if (integrationType === 'leetcode' && student.externalHandles.leetcode) {
             const username = student.externalHandles.leetcode.trim();
             const response = await fetch(`https://leetcode-api-faisalshohag.vercel.app/${username}`, {
                 signal: AbortSignal.timeout(4000)
