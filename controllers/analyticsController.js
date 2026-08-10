@@ -2467,114 +2467,63 @@ exports.getStudentLeaderboard = async (req, res) => {
             return res.status(400).json({ success: false, error: 'Student is not mapped to any batch' });
         }
 
-        // 1. Sync the logged-in student's external score in real-time if batch has integration
-        if (batch.integrationType && batch.integrationType !== 'none') {
-            await syncStudentExternalScore(currentStudent, batch.integrationType);
-        }
-
         // 2. Fetch all active students in the same batch
         const students = await Student.find({ batchId: batch._id, status: 'active' });
 
         let leaderboardData = [];
 
-        if (batch.integrationType && batch.integrationType !== 'none') {
-            // Sort students by externalScore desc, then externalBadges desc
-            students.sort((a, b) => {
-                if (b.externalScore !== a.externalScore) {
-                    return b.externalScore - a.externalScore;
-                }
-                return b.externalBadges - a.externalBadges;
-            });
+        // Regular quiz mode leaderboard - fetch completed attempts for this batch
+        const exams = await Exam.find({ batches: batch._id }).select('_id');
+        const examIds = exams.map(e => e._id);
 
-            leaderboardData = students.map((s, idx) => ({
-                rank: idx + 1,
+        const attempts = await StudentAttempt.find({
+            examId: { $in: examIds },
+            status: 'completed'
+        }).populate('examId', 'title totalMarks');
+
+        const studentScores = {};
+        attempts.forEach(a => {
+            const roll = a.studentDetails?.rollNumber;
+            if (!roll) return;
+            const existing = studentScores[roll];
+            if (!existing || a.percentage > existing.percentage) {
+                studentScores[roll] = a;
+            }
+        });
+
+        const mapped = students.map(s => {
+            const attempt = studentScores[s.usn];
+            return {
                 name: s.name,
                 usn: s.usn,
                 department: s.department || 'N/A',
-                score: s.externalScore || 0,
-                badges: s.externalBadges || 0,
-                isSelf: s._id.toString() === studentId.toString(),
-                integrationType: batch.integrationType
-            }));
-        } else {
-            // Regular quiz mode leaderboard - fetch completed attempts for this batch
-            const exams = await Exam.find({ batches: batch._id }).select('_id');
-            const examIds = exams.map(e => e._id);
+                score: attempt ? attempt.totalScore : 0,
+                totalMarks: attempt ? attempt.examId?.totalMarks || 0 : 0,
+                percentage: attempt ? parseFloat(attempt.percentage.toFixed(2)) : 0,
+                isSelf: s._id.toString() === studentId.toString()
+            };
+        });
 
-            const attempts = await StudentAttempt.find({
-                examId: { $in: examIds },
-                status: 'completed'
-            }).populate('examId', 'title totalMarks');
+        mapped.sort((a, b) => {
+            if (b.percentage !== a.percentage) {
+                return b.percentage - a.percentage;
+            }
+            return b.score - a.score;
+        });
 
-            const studentScores = {};
-            attempts.forEach(a => {
-                const roll = a.studentDetails?.rollNumber;
-                if (!roll) return;
-                const existing = studentScores[roll];
-                if (!existing || a.percentage > existing.percentage) {
-                    studentScores[roll] = a;
-                }
-            });
-
-            const mapped = students.map(s => {
-                const attempt = studentScores[s.usn];
-                return {
-                    name: s.name,
-                    usn: s.usn,
-                    department: s.department || 'N/A',
-                    score: attempt ? attempt.totalScore : 0,
-                    totalMarks: attempt ? attempt.examId?.totalMarks || 0 : 0,
-                    percentage: attempt ? parseFloat(attempt.percentage.toFixed(2)) : 0,
-                    isSelf: s._id.toString() === studentId.toString()
-                };
-            });
-
-            mapped.sort((a, b) => {
-                if (b.percentage !== a.percentage) {
-                    return b.percentage - a.percentage;
-                }
-                return b.score - a.score;
-            });
-
-            leaderboardData = mapped.map((item, idx) => ({
-                rank: idx + 1,
-                ...item,
-                integrationType: 'none'
-            }));
-        }
+        leaderboardData = mapped.map((item, idx) => ({
+            rank: idx + 1,
+            ...item,
+            integrationType: 'none'
+        }));
 
         res.json({
             success: true,
             batchName: batch.batchName,
-            integrationType: batch.integrationType || 'none',
+            integrationType: 'none',
             data: leaderboardData
         });
-
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 };
-
-async function syncStudentExternalScore(student, integrationType) {
-    if (!student.externalHandles) return;
-
-    try {
-        if (integrationType === 'leetcode' && student.externalHandles.leetcode) {
-            const username = student.externalHandles.leetcode.trim();
-            const response = await fetch(`https://leetcode-api-faisalshohag.vercel.app/${username}`, {
-                signal: AbortSignal.timeout(4000)
-            });
-            if (response.ok) {
-                const data = await response.json();
-                if (data && data.matchedUser) {
-                    const submissionNum = data.matchedUser.submitStats.acSubmissionNum;
-                    const totalSolved = submissionNum.find(x => x.difficulty === 'All')?.count || 0;
-                    student.externalScore = totalSolved;
-                    await student.save();
-                }
-            }
-        }
-    } catch (err) {
-        console.error(`Failed to sync external score for ${student.name} (${integrationType}):`, err.message);
-    }
-}

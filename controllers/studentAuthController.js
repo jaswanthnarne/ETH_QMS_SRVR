@@ -261,7 +261,7 @@ exports.getStudentMe = async (req, res) => {
             .populate('collegeId', 'name code')
             .populate({
                 path: 'batchId',
-                select: 'batchName trainerId courseId integrationType integrationConfig',
+                select: 'batchName trainerId courseId',
                 populate: [
                     { path: 'trainerId', select: 'firstName lastName phone email' },
                     { path: 'courseId', select: 'name code' }

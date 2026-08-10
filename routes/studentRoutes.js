@@ -20,7 +20,7 @@ const {
     updateStudentTodo,
     deleteStudentTodoPermanently
 } = require('../controllers/studentAuthController');
-const { updateExternalHandles } = require('../controllers/studentController');
+
 
 const { getStudentLeaderboard } = require('../controllers/analyticsController');
 
@@ -32,7 +32,7 @@ router.use(protectStudent);
 router.get('/me', getStudentMe);
 router.put('/change-password', changeStudentPassword);
 router.put('/profile', updateStudentProfile);
-router.put('/profile/handles', updateExternalHandles);
+
 router.post('/resume', upload.single('resume'), uploadStudentResume);
 router.get('/attempts', getStudentAttempts);
 router.get('/active-exams', getStudentActiveExams);

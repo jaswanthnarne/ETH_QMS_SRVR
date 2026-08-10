@@ -54,19 +54,7 @@ const studentSchema = new mongoose.Schema({
             default: 'Any'
         }
     },
-    resumeUrl: String,
-    externalHandles: {
-        leetcode: { type: String, default: null },
-        kaggle: { type: String, default: null }
-    },
-    externalScore: {
-        type: Number,
-        default: 0
-    },
-    externalBadges: {
-        type: Number,
-        default: 0
-    }
+    resumeUrl: String
 }, {
     timestamps: true
 });
