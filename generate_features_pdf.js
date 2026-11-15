@@ -7,9 +7,9 @@ const path = require('path');
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const C = {
-    navy:       '#004AAD',
-    darkNavy:   '#003580',
-    deepNavy:   '#002255',
+    navy:       '#5899B5',
+    darkNavy:   '#3D7690',
+    deepNavy:   '#2B5B72',
     slate900:   '#0F172A',
     slate800:   '#1E293B',
     slate700:   '#334155',
@@ -38,9 +38,9 @@ const C = {
     purple50:   '#F5F3FF',
     purple600:  '#9333EA',
     purple800:  '#5B21B6',
-    blue50:     '#EFF6FF',
-    blue600:    '#2563EB',
-    blue800:    '#1E40AF',
+    blue50:     '#F2F8FA',
+    blue600:    '#5899B5',
+    blue800:    '#3D7690',
 };
 
 const PW = 595.28;
@@ -267,7 +267,7 @@ doc.moveDown(0.5);
 const tiers = [
     { tier: 'Global',        roles: 'Super Admin, Ops Admin, Asst Ops Admin',  desc: 'Unrestricted access across all institutions, users, and resources.',           bg: '#FEE2E2', tc: '#991B1B' },
     { tier: 'Regional',      roles: 'Regional Manager, Asst Regional Manager', desc: 'Access restricted to a defined list of assigned colleges.',                    bg: C.green100, tc: C.green800 },
-    { tier: 'Institutional', roles: 'College Admin, Placement Officer',         desc: 'Authority within a single college. No cross-institution visibility.',         bg: '#DBEAFE', tc: C.blue800 },
+    { tier: 'Institutional', roles: 'College Admin, Placement Officer',         desc: 'Authority within a single college. No cross-institution visibility.',         bg: '#E1EFF5', tc: C.blue800 },
     { tier: 'Classroom',     roles: 'Trainer',                                  desc: 'Limited to mapped batches and courses. Can create exams and proctor.',         bg: C.amber100, tc: C.amber800 },
     { tier: 'Portal',        roles: 'Student',                                  desc: 'Student-facing assessment portal. Take exams and view personal data only.',    bg: C.slate100, tc: C.slate800 },
 ];
@@ -369,7 +369,7 @@ const roles = [
     },
     {
         role: 'College Admin', code: 'CA', scope: 'Single Institution Owner',
-        accent: '#2563EB',
+        accent: '#5899B5',
         desc: 'Complete operational authority over a single college context. Manages all local resources including courses, trainers, batches, and students. Cannot view other institutions.',
         features: [
             ['Local Roster', 'Manage courses, batches, and student lists for their specific college. Upload college logos and edit institutional profile details.'],
@@ -679,7 +679,7 @@ const baseHierY = doc.y;
 const hierLayers = [
     { label: 'GLOBAL SCOPE',        sub: 'Super Admin  /  Ops Admin  /  Asst Ops Admin',   w: 420, h: 330, bg: '#FEE2E2', border: '#FECACA', tc: '#991B1B' },
     { label: 'REGIONAL SCOPE',      sub: 'Regional Manager  /  Asst Regional Manager',     w: 340, h: 256, bg: C.green100, border: '#A7F3D0', tc: C.green800 },
-    { label: 'INSTITUTIONAL SCOPE', sub: 'College Admin  /  Placement Officer',             w: 260, h: 182, bg: '#DBEAFE', border: '#BFDBFE', tc: C.blue800 },
+    { label: 'INSTITUTIONAL SCOPE', sub: 'College Admin  /  Placement Officer',             w: 260, h: 182, bg: '#E1EFF5', border: '#C3E0EC', tc: C.blue800 },
     { label: 'CLASSROOM SCOPE',     sub: 'Trainer',                                         w: 180, h: 108, bg: C.amber100, border: '#FDE68A', tc: C.amber800 },
     { label: 'PORTAL',              sub: 'Student',                                         w: 110, h:  46, bg: C.slate100, border: C.slate300, tc: C.slate800 },
 ];

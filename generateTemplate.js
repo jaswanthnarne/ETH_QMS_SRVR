@@ -27,7 +27,7 @@ async function generate() {
     // Style header
     const headerRow = sheet.getRow(1);
     headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
-    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF004AAD' } };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5899B5' } };
     headerRow.height = 22;
     headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
     headerRow.commit();
@@ -50,7 +50,7 @@ async function generate() {
     // Add instructions sheet
     const infoSheet = workbook.addWorksheet('Instructions');
     infoSheet.getCell('A1').value = 'BULK IMPORT TEMPLATE — INSTRUCTIONS';
-    infoSheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF004AAD' } };
+    infoSheet.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF5899B5' } };
     
     const instructions = [
         ['', ''],

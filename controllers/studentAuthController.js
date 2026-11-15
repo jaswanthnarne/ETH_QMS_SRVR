@@ -22,6 +22,20 @@ const generateToken = (id) => {
     });
 };
 
+// @desc    Get active partner colleges for public landing marquee
+// @route   GET /api/student/colleges
+// @access  Public
+exports.getPublicColleges = async (req, res) => {
+    try {
+        const colleges = await College.find({ status: 'active' })
+            .select('name code logoUrl address')
+            .lean();
+        res.json({ success: true, data: colleges });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Failed to fetch colleges' });
+    }
+};
+
 // @desc    Authenticate Student & get token
 // @route   POST /api/student/login
 // @access  Public

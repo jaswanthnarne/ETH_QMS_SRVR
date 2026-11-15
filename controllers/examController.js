@@ -736,7 +736,7 @@ exports.submitExamAttempt = async (req, res) => {
                                 .wrapper { max-width: 600px; margin: 20px auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
                                 .header { background-color: #0f172a; padding: 35px 20px; text-align: center; color: white; }
                                 .header h1 { font-size: 22px; font-weight: 800; margin: 0; letter-spacing: -0.02em; }
-                                .header p { font-size: 11px; text-transform: uppercase; color: #004AAD; font-weight: bold; letter-spacing: 0.15em; margin: 8px 0 0 0; }
+                                .header p { font-size: 11px; text-transform: uppercase; color: #5899B5; font-weight: bold; letter-spacing: 0.15em; margin: 8px 0 0 0; }
                                 
                                 .content { padding: 30px; }
                                 .salutation { font-size: 16px; font-weight: 600; color: #0f172a; margin-top: 0; }
@@ -806,7 +806,7 @@ exports.submitExamAttempt = async (req, res) => {
                                             </td>
                                             <td style="width: 33.33%; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 15px; text-align: center;">
                                                 <p style="font-size: 9px; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin: 0 0 5px 0;">Final Marks</p>
-                                                <p style="font-size: 18px; font-weight: 800; color: #004AAD; margin: 0;">${attempt.totalScore} / ${maxScore} pts</p>
+                                                <p style="font-size: 18px; font-weight: 800; color: #5899B5; margin: 0;">${attempt.totalScore} / ${maxScore} pts</p>
                                             </td>
                                         </tr>
                                     </table>

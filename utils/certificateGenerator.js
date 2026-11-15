@@ -39,7 +39,7 @@ const generateCertificate = ({ studentName, rollNumber, examTitle, courseName, c
         doc.moveTo(0, 0)
            .lineTo(250, 0)
            .lineTo(0, 250)
-           .fill('#002B5B');
+           .fill('#2B5B72');
         
         // Top left secondary gold accent
         doc.moveTo(0, 250)
@@ -52,7 +52,7 @@ const generateCertificate = ({ studentName, rollNumber, examTitle, courseName, c
         doc.moveTo(w, h)
            .lineTo(w - 350, h)
            .lineTo(w, h - 350)
-           .fill('#002B5B');
+           .fill('#2B5B72');
 
         // Bottom Right secondary gold accent
         doc.moveTo(w - 350, h)
@@ -64,7 +64,7 @@ const generateCertificate = ({ studentName, rollNumber, examTitle, courseName, c
 
         // Main Inner Border (Sleek offset border)
         const margin = 40;
-        doc.lineWidth(1).rect(margin, margin, w - margin * 2, h - margin * 2).stroke('#002B5B');
+        doc.lineWidth(1).rect(margin, margin, w - margin * 2, h - margin * 2).stroke('#2B5B72');
         doc.lineWidth(3).rect(margin + 5, margin + 5, w - (margin + 5) * 2, h - (margin + 5) * 2).stroke('#D4AF37');
 
         // --- HEADER LOGOS ---
@@ -72,11 +72,11 @@ const generateCertificate = ({ studentName, rollNumber, examTitle, courseName, c
         if (fs.existsSync(logoPath)) {
             doc.image(logoPath, w / 2 - 80, 50, { width: 160 });
         } else {
-            doc.fontSize(28).fill('#002B5B').font('Helvetica-Bold').text('ETHNOTECH ACADEMY', 0, 70, { align: 'center' });
+            doc.fontSize(28).fill('#2B5B72').font('Helvetica-Bold').text('ETHNOTECH ACADEMY', 0, 70, { align: 'center' });
         }
 
         // --- CERTIFICATE TEXT ---
-        doc.fontSize(52).fill('#002B5B').font('Helvetica-Bold').text('CERTIFICATE', 0, 160, { align: 'center', characterSpacing: 8 });
+        doc.fontSize(52).fill('#2B5B72').font('Helvetica-Bold').text('CERTIFICATE', 0, 160, { align: 'center', characterSpacing: 8 });
         doc.fontSize(16).fill('#D4AF37').font('Helvetica').text('OF EXCELLENCE & COMPLETION', 0, 215, { align: 'center', characterSpacing: 6 });
 
         // --- RECIPIENT ---
@@ -95,7 +95,7 @@ const generateCertificate = ({ studentName, rollNumber, examTitle, courseName, c
         doc.fontSize(14).fill('#4A5568').font('Helvetica').text('For the successful completion and demonstrated mastery in:', 0, 385, { align: 'center' });
 
         const safeExamTitle = (examTitle || 'Assessment').toString().toUpperCase();
-        doc.fontSize(22).fill('#002B5B').font('Helvetica-Bold').text(`"${safeExamTitle}"`, 0, 410, { align: 'center' });
+        doc.fontSize(22).fill('#2B5B72').font('Helvetica-Bold').text(`"${safeExamTitle}"`, 0, 410, { align: 'center' });
 
         // --- SCORES ---
         doc.fontSize(13).fill('#2D3748').font('Helvetica-Bold')

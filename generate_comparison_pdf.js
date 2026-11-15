@@ -7,9 +7,9 @@ const path = require('path');
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const C = {
-    navy:       '#004AAD',
-    darkNavy:   '#003580',
-    deepNavy:   '#002255',
+    navy:       '#5899B5',
+    darkNavy:   '#3D7690',
+    deepNavy:   '#2B5B72',
     slate900:   '#0F172A',
     slate800:   '#1E293B',
     slate700:   '#334155',
@@ -32,10 +32,10 @@ const C = {
     amber100:   '#FEF3C7',
     amber600:   '#D97706',
     amber800:   '#92400E',
-    blue50:     '#EFF6FF',
-    blue100:    '#DBEAFE',
-    blue600:    '#2563EB',
-    blue800:    '#1E40AF',
+    blue50:     '#F2F8FA',
+    blue100:    '#E1EFF5',
+    blue600:    '#5899B5',
+    blue800:    '#3D7690',
 };
 
 const PW = 595.28;

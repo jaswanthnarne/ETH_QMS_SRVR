@@ -7,6 +7,7 @@ const upload = multer({
 });
 const { protectStudent } = require('../middleware/authMiddleware');
 const {
+    getPublicColleges,
     loginStudent,
     setupStudentPassword,
     changeStudentPassword,
@@ -24,6 +25,7 @@ const {
 
 const { getStudentLeaderboard } = require('../controllers/analyticsController');
 
+router.get('/colleges', getPublicColleges);
 router.post('/login', loginStudent);
 router.post('/setup-password', setupStudentPassword);
 

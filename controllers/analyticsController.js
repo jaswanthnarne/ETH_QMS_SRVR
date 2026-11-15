@@ -15,7 +15,7 @@ const Question = require('../models/Question');
 
 
 // ========== Helper: style header row ==========
-function styleHeader(sheet, color = 'FF004AAD') {
+function styleHeader(sheet, color = 'FF5899B5') {
     const row = sheet.getRow(1);
     row.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Inter' };
     row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: color } };
@@ -472,7 +472,7 @@ exports.exportMasterSheet = async (req, res) => {
 
                 // Row 1: Title Row
                 const titleRow = logsSheet.addRow([`Training Logs Report — ${courseGroup.name} (${courseGroup.code})`]);
-                titleRow.font = { bold: true, size: 14, color: { argb: 'FF004AAD' } };
+                titleRow.font = { bold: true, size: 14, color: { argb: 'FF5899B5' } };
                 logsSheet.mergeCells(1, 1, 1, 8);
                 titleRow.height = 28;
 
@@ -501,17 +501,17 @@ exports.exportMasterSheet = async (req, res) => {
                 const headers = ['Log Date', 'Module', 'Topic Covered', 'Time Slot', 'Department', 'Present Count', 'Actual Count', 'Attendance %'];
                 const headerRow = logsSheet.addRow(headers);
                 headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
-                headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF004AAD' } };
+                headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5899B5' } };
                 headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
                 headerRow.height = 24;
 
                 // Add borders to headers
                 headerRow.eachCell(cell => {
                     cell.border = {
-                        top: { style: 'thin', color: { argb: 'FF003580' } },
-                        bottom: { style: 'thin', color: { argb: 'FF003580' } },
-                        left: { style: 'thin', color: { argb: 'FF003580' } },
-                        right: { style: 'thin', color: { argb: 'FF003580' } }
+                        top: { style: 'thin', color: { argb: 'FF3D7690' } },
+                        bottom: { style: 'thin', color: { argb: 'FF3D7690' } },
+                        left: { style: 'thin', color: { argb: 'FF3D7690' } },
+                        right: { style: 'thin', color: { argb: 'FF3D7690' } }
                     };
                 });
 
@@ -623,7 +623,7 @@ exports.exportMasterSheet = async (req, res) => {
                 // Style Overview Header
                 const overviewHeader = summarySheet.getRow(1);
                 overviewHeader.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Inter' };
-                overviewHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF004AAD' } };
+                overviewHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5899B5' } };
                 overviewHeader.alignment = { vertical: 'middle', horizontal: 'left' };
                 overviewHeader.height = 24;
 
@@ -672,7 +672,7 @@ exports.exportMasterSheet = async (req, res) => {
                     const titleRow = sheet.getRow(1);
                     titleRow.getCell(1).value = `🏫 ${college.name} (Code: ${college.code})`;
                     titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' }, name: 'Inter' };
-                    titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF004AAD' } };
+                    titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5899B5' } };
                     titleRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
                     titleRow.height = 32;
 
@@ -927,7 +927,7 @@ exports.exportMasterSheet = async (req, res) => {
             const titleRow = overviewSheet.getRow(1);
             titleRow.getCell(1).value = `🏫 Institutional Profile — ${college.name}`;
             titleRow.getCell(1).font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' }, name: 'Inter' };
-            titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF004AAD' } };
+            titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5899B5' } };
             titleRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
             titleRow.height = 36;
 
@@ -996,7 +996,7 @@ exports.exportMasterSheet = async (req, res) => {
 
                 if (idx >= 7) {
                     keyCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4FF' } };
-                    keyCell.font = { bold: true, size: 10, color: { argb: 'FF004AAD', name: 'Inter' } };
+                    keyCell.font = { bold: true, size: 10, color: { argb: 'FF5899B5', name: 'Inter' } };
                     valCell.font = { bold: true, size: 10, color: { argb: 'FF0F172A', name: 'Inter' } };
                 }
             });
@@ -1279,7 +1279,7 @@ exports.exportMasterSheet = async (req, res) => {
                 const regTitleRow = registerSheet.getRow(1);
                 regTitleRow.getCell(1).value = `📋 Student Attendance Register — ${batch.batchName} (${batch.department})`;
                 regTitleRow.getCell(1).font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' }, name: 'Inter' };
-                regTitleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF004AAD' } };
+                regTitleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5899B5' } };
                 regTitleRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
                 regTitleRow.height = 30;
 
@@ -1581,7 +1581,7 @@ exports.exportMasterSheet = async (req, res) => {
                 { header: 'Metric Category', key: 'category', width: 28 },
                 { header: 'Details', key: 'details', width: 45 }
             ];
-            styleHeader(summarySheet, 'FF004AAD');
+            styleHeader(summarySheet, 'FF5899B5');
 
             const totalPassed = attempts.filter(a => a.result === 'pass').length;
             const totalFailed = attempts.filter(a => a.result === 'fail').length;
@@ -1635,7 +1635,7 @@ exports.exportMasterSheet = async (req, res) => {
                 const row = summarySheet.addRow({ category, details });
                 if (details === '' && category !== '') {
                     row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0EEFF' } };
-                    row.font = { bold: true, color: { argb: 'FF004AAD' }, size: 11, name: 'Segoe UI' };
+                    row.font = { bold: true, color: { argb: 'FF5899B5' }, size: 11, name: 'Segoe UI' };
                     row.height = 24;
                 } else {
                     styleDataRow(row, i % 2 === 0);
@@ -2200,7 +2200,7 @@ exports.exportMasterSheet = async (req, res) => {
             const titleRow = courseSheet.getRow(1);
             titleRow.getCell(1).value = `📚 ${courseName} (${courseCode}) — Course Analytics`;
             titleRow.getCell(1).font = { bold: true, size: 13, color: { argb: 'FFFFFFFF' } };
-            titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF004AAD' } };
+            titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5899B5' } };
             titleRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'center' };
             titleRow.height = 28;
 

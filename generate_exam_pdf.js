@@ -13,7 +13,7 @@ const College = require('./models/College');
 const Course = require('./models/Course');
 
 const C = {
-    primary:    '#004AAD', // Ethnotech Navy
+    primary:    '#5899B5', // Ethnotech Navy
     secondary:  '#059669', // Emerald Green
     textDark:   '#0F172A', // Slate 900
     textMedium: '#334155', // Slate 700
