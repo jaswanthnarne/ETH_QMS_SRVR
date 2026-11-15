@@ -272,19 +272,23 @@ exports.uploadStudentResume = async (req, res) => {
 exports.getStudentMe = async (req, res) => {
     try {
         const student = await Student.findById(req.student._id)
-            .populate('collegeId', 'name code')
+            .populate('collegeId', 'name code address logoUrl')
             .populate({
                 path: 'batchId',
-                select: 'batchName trainerId courseId',
+                select: 'batchName department program startDate endDate status studentCount trainerId courseId createdAt',
                 populate: [
                     { path: 'trainerId', select: 'firstName lastName phone email' },
-                    { path: 'courseId', select: 'name code' }
+                    { path: 'courseId', select: 'name code description duration modulesCount program status syllabusUrl' }
                 ]
             });
 
         if (!student) {
             return res.status(404).json({ success: false, error: 'Student profile not found' });
         }
+
+        const batchStrength = student.batchId?._id
+            ? await Student.countDocuments({ batchId: student.batchId._id })
+            : 0;
 
         // Calculate attendance dynamically
         let attendanceSummary = {
@@ -328,9 +332,20 @@ exports.getStudentMe = async (req, res) => {
             };
         }
 
+        const studentObj = student.toObject();
+        studentObj.collegeName = student.collegeId?.name || studentObj.collegeName || '';
+        studentObj.collegeCode = student.collegeId?.code || studentObj.collegeCode || '';
+        studentObj.batchName = student.batchId?.batchName || studentObj.batchName || '';
+        studentObj.courseName = student.batchId?.courseId?.name || '';
+        studentObj.courseCode = student.batchId?.courseId?.code || '';
+        studentObj.trainerName = student.batchId?.trainerId
+            ? `${student.batchId.trainerId.firstName || ''} ${student.batchId.trainerId.lastName || ''}`.trim()
+            : '';
+        studentObj.batchStrength = batchStrength || student.batchId?.studentCount || 0;
+
         res.json({ 
             success: true, 
-            data: student,
+            data: studentObj,
             attendance: attendanceSummary
         });
     } catch (error) {
