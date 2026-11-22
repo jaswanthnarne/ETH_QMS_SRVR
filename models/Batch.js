@@ -38,7 +38,18 @@ const batchSchema = new mongoose.Schema({
     studentCount: {
         type: Number,
         default: 0
-    }
+    },
+    materials: [{
+        title: { type: String, required: true },
+        module: { type: String, default: 'General' },
+        type: { type: String, default: 'PDF Notes' },
+        fileUrl: { type: String, required: true },
+        fileName: String,
+        description: String,
+        uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        uploadedByName: String,
+        uploadedAt: { type: Date, default: Date.now }
+    }]
 }, {
     timestamps: true
 });

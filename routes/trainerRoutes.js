@@ -1,5 +1,10 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const materialUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 15 * 1024 * 1024 }
+});
 const { protect, authorize } = require('../middleware/authMiddleware');
 
 const { 
@@ -15,7 +20,11 @@ const {
     restartSession,
     getTrainerCollegesAndCourses,
     resetStudentAttempt,
-    addExtraTime
+    addExtraTime,
+    getTrainerMaterials,
+    uploadTrainerMaterial,
+    updateTrainerMaterial,
+    deleteTrainerMaterial
 } = require('../controllers/trainerController');
 
 const {
@@ -51,4 +60,11 @@ router.delete('/logs/:id', deleteLog);
 // Trainer Batches CRUD Routes
 const { getBatches } = require('../controllers/batchController');
 router.get('/batches', getBatches);
+
+// Trainer Study Materials CRUD Routes
+router.get('/materials', getTrainerMaterials);
+router.post('/materials', materialUpload.single('file'), uploadTrainerMaterial);
+router.put('/materials/:batchId/:materialId', materialUpload.single('file'), updateTrainerMaterial);
+router.delete('/materials/:batchId/:materialId', deleteTrainerMaterial);
+
 module.exports = router;

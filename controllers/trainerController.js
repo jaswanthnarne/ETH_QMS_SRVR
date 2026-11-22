@@ -713,3 +713,233 @@ exports.addExtraTime = async (req, res) => {
     }
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TRAINER STUDY MATERIALS CRUD
+// ─────────────────────────────────────────────────────────────────────────────
+
+const path = require('path');
+const MaterialFile = require('../models/MaterialFile');
+
+const uploadMaterialFileHelper = async (file, req) => {
+    const ext = path.extname(file.originalname || '') || '.pdf';
+    const baseName = path.basename(file.originalname || 'material', ext).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeName = `${baseName}${ext}`;
+    const isPdf = ext.toLowerCase() === '.pdf' || file.mimetype === 'application/pdf';
+
+    const doc = await MaterialFile.create({
+        fileName: safeName,
+        contentType: isPdf ? 'application/pdf' : (file.mimetype || 'application/octet-stream'),
+        size: file.size || file.buffer.length,
+        data: file.buffer,
+        uploadedBy: req.user?._id
+    });
+
+    return `/api/material-file/${doc._id}/${safeName}`;
+};
+
+// GET /api/trainer/materials
+exports.getTrainerMaterials = async (req, res) => {
+    try {
+        const query = {};
+        if (req.user.role === 'trainer') {
+            query.trainerId = req.user._id;
+        }
+        if (req.query.collegeId) {
+            query.collegeId = req.query.collegeId;
+        }
+        if (req.query.batchId && req.query.batchId !== 'all') {
+            query._id = req.query.batchId;
+        }
+
+        // Auto-remove any legacy broken Cloudinary PDF entries from earlier test uploads
+        await Batch.updateMany(
+            { 'materials.fileUrl': { $regex: /res\.cloudinary\.com.*qms_study_materials/i } },
+            { $pull: { materials: { fileUrl: { $regex: /res\.cloudinary\.com.*qms_study_materials/i } } } }
+        );
+
+        const batches = await Batch.find(query)
+            .populate('collegeId', 'name code')
+            .populate('courseId', 'name code program')
+            .sort({ createdAt: -1 })
+            .lean();
+
+        const materials = [];
+        batches.forEach((b) => {
+            (b.materials || []).forEach((m) => {
+                materials.push({
+                    ...m,
+                    batchId: b._id,
+                    batchName: b.batchName,
+                    department: b.department,
+                    collegeName: b.collegeId?.name || '',
+                    courseName: b.courseId?.name || '',
+                    courseCode: b.courseId?.code || ''
+                });
+            });
+        });
+
+        materials.sort((a, b) => new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0));
+
+        res.json({
+            success: true,
+            data: {
+                batches: batches.map((b) => ({
+                    _id: b._id,
+                    batchName: b.batchName,
+                    department: b.department,
+                    status: b.status,
+                    studentCount: b.studentCount || 0,
+                    collegeName: b.collegeId?.name || '',
+                    courseName: b.courseId?.name || '',
+                    courseCode: b.courseId?.code || '',
+                    materialsCount: (b.materials || []).length
+                })),
+                materials
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// POST /api/trainer/materials
+exports.uploadTrainerMaterial = async (req, res) => {
+    try {
+        const { batchId, title, module, type, description, fileUrl: bodyFileUrl } = req.body;
+
+        if (!title || !title.trim()) {
+            return res.status(400).json({ success: false, error: 'Material title is required' });
+        }
+        if (!batchId) {
+            return res.status(400).json({ success: false, error: 'Please select a target batch' });
+        }
+
+        let finalFileUrl = (bodyFileUrl || '').trim();
+        let fileName = '';
+
+        if (req.file) {
+            finalFileUrl = await uploadMaterialFileHelper(req.file, req);
+            fileName = req.file.originalname || '';
+        }
+
+        if (!finalFileUrl) {
+            return res.status(400).json({ success: false, error: 'Please attach a file or provide a valid resource URL' });
+        }
+
+        const batchQuery = {};
+        if (req.user.role === 'trainer') {
+            batchQuery.trainerId = req.user._id;
+        }
+        if (batchId !== 'all') {
+            batchQuery._id = batchId;
+        } else if (req.body.collegeId) {
+            batchQuery.collegeId = req.body.collegeId;
+        }
+
+        const targetBatches = await Batch.find(batchQuery);
+        if (!targetBatches.length) {
+            return res.status(404).json({ success: false, error: 'No matching batch found for this trainer' });
+        }
+
+        const uploaderName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'Trainer';
+        const materialPayload = {
+            title: title.trim(),
+            module: (module || 'General').trim(),
+            type: type || 'PDF Notes',
+            fileUrl: finalFileUrl,
+            fileName,
+            description: (description || '').trim(),
+            uploadedBy: req.user._id,
+            uploadedByName: uploaderName,
+            uploadedAt: new Date()
+        };
+
+        for (const b of targetBatches) {
+            if (!Array.isArray(b.materials)) b.materials = [];
+            b.materials.push(materialPayload);
+            await b.save();
+        }
+
+        const io = req.app.get('socketio');
+        if (io) {
+            io.emit('material_updated', { batchId, timestamp: new Date() });
+        }
+
+        res.status(201).json({
+            success: true,
+            message:
+                targetBatches.length > 1
+                    ? `Study material published to ${targetBatches.length} batches!`
+                    : 'Study material uploaded successfully!'
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// PUT /api/trainer/materials/:batchId/:materialId
+exports.updateTrainerMaterial = async (req, res) => {
+    try {
+        const { batchId, materialId } = req.params;
+        const { title, module, type, description, fileUrl: bodyFileUrl } = req.body;
+
+        const query = { _id: batchId };
+        if (req.user.role === 'trainer') query.trainerId = req.user._id;
+
+        const batch = await Batch.findOne(query);
+        if (!batch) {
+            return res.status(404).json({ success: false, error: 'Batch not found or unauthorized' });
+        }
+
+        const mat = (batch.materials || []).id(materialId);
+        if (!mat) {
+            return res.status(404).json({ success: false, error: 'Study material not found' });
+        }
+
+        if (title !== undefined && title.trim()) mat.title = title.trim();
+        if (module !== undefined) mat.module = module.trim() || 'General';
+        if (type !== undefined) mat.type = type;
+        if (description !== undefined) mat.description = description.trim();
+
+        if (req.file) {
+            mat.fileUrl = await uploadMaterialFileHelper(req.file, req);
+            mat.fileName = req.file.originalname || mat.fileName;
+        } else if (bodyFileUrl && bodyFileUrl.trim()) {
+            mat.fileUrl = bodyFileUrl.trim();
+        }
+
+        await batch.save();
+
+        const io = req.app.get('socketio');
+        if (io) io.emit('material_updated', { batchId, materialId, timestamp: new Date() });
+
+        res.json({ success: true, message: 'Study material updated successfully' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// DELETE /api/trainer/materials/:batchId/:materialId
+exports.deleteTrainerMaterial = async (req, res) => {
+    try {
+        const { batchId, materialId } = req.params;
+        const query = { _id: batchId };
+        if (req.user.role === 'trainer') query.trainerId = req.user._id;
+
+        const batch = await Batch.findOne(query);
+        if (!batch) {
+            return res.status(404).json({ success: false, error: 'Batch not found or unauthorized' });
+        }
+
+        batch.materials = (batch.materials || []).filter((m) => m._id.toString() !== materialId);
+        await batch.save();
+
+        const io = req.app.get('socketio');
+        if (io) io.emit('material_updated', { batchId, materialId, timestamp: new Date() });
+
+        res.json({ success: true, message: 'Study material removed successfully' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+

@@ -63,11 +63,46 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true
 }));
-app.use(helmet());
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: false,
+    frameguard: false
+}));
 app.use(morgan('dev'));
 
-// Serve uploaded images
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Serve uploaded files and PDFs inline with proper headers
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+    setHeaders: (res, filePath) => {
+        res.removeHeader('X-Frame-Options');
+        if (filePath.toLowerCase().endsWith('.pdf')) {
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', 'inline');
+        }
+    }
+}));
+
+// Direct Normal URL endpoint for Study Material PDFs & Files stored in MongoDB
+const MaterialFile = require('./models/MaterialFile');
+const serveMaterialFile = async (req, res) => {
+    try {
+        const doc = await MaterialFile.findById(req.params.id);
+        if (!doc || !doc.data) {
+            return res.status(404).send('Study material file not found');
+        }
+        const isPdf = (doc.fileName || '').toLowerCase().endsWith('.pdf') || doc.contentType === 'application/pdf';
+        res.removeHeader('X-Frame-Options');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Content-Type', isPdf ? 'application/pdf' : (doc.contentType || 'application/octet-stream'));
+        res.setHeader('Content-Length', doc.data.length);
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(doc.fileName || 'material.pdf')}"`);
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.send(doc.data);
+    } catch (err) {
+        return res.status(404).send('Invalid study material file URL');
+    }
+};
+app.get('/api/material-file/:id', serveMaterialFile);
+app.get('/api/material-file/:id/:fileName', serveMaterialFile);
 
 // Rate limiters
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { success: false, error: 'Too many login attempts, please try again after 15 minutes' } });

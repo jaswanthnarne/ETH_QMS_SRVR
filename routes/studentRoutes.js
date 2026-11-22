@@ -19,7 +19,8 @@ const {
     getStudentTodos,
     createStudentTodo,
     updateStudentTodo,
-    deleteStudentTodoPermanently
+    deleteStudentTodoPermanently,
+    getStudentStudyMaterials
 } = require('../controllers/studentAuthController');
 
 
@@ -45,4 +46,7 @@ router.get('/todos', getStudentTodos);
 router.post('/todos', createStudentTodo);
 router.put('/todos/:id', updateStudentTodo);
 router.delete('/todos/:id', deleteStudentTodoPermanently);
+
+// Study materials route
+router.get('/study-materials', getStudentStudyMaterials);
 module.exports = router;

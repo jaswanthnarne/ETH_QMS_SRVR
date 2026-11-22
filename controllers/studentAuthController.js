@@ -48,8 +48,14 @@ exports.loginStudent = async (req, res) => {
         }
 
         const queryValue = usernameOrMobile.trim();
-        // Find strictly by mobile number (username)
-        let student = await Student.findOne({ mobile: queryValue })
+        const escapedQuery = queryValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Find by mobile number or USN
+        let student = await Student.findOne({
+            $or: [
+                { mobile: queryValue },
+                { usn: { $regex: new RegExp(`^${escapedQuery}$`, 'i') } }
+            ]
+        })
             .select('+password')
             .populate('collegeId')
             .populate('batchId');
@@ -234,28 +240,20 @@ exports.uploadStudentResume = async (req, res) => {
             return res.status(404).json({ success: false, error: 'Student not found' });
         }
 
-        // Upload resume PDF to Cloudinary as raw resource type
-        const uploadStream = () => {
-            return new Promise((resolve, reject) => {
-                const stream = cloudinary.uploader.upload_stream(
-                    {
-                        folder: 'student_resumes',
-                        resource_type: 'raw'
-                    },
-                    (error, result) => {
-                        if (result) {
-                            resolve(result);
-                        } else {
-                            reject(error);
-                        }
-                    }
-                );
-                stream.end(req.file.buffer);
-            });
-        };
+        const fs = require('fs');
+        const path = require('path');
+        const uploadDir = path.join(__dirname, '..', 'uploads', 'resumes');
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        const ext = path.extname(req.file.originalname || '') || '.pdf';
+        const baseName = path.basename(req.file.originalname || 'resume', ext).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const safeName = `${Date.now()}_${baseName}${ext}`;
+        fs.writeFileSync(path.join(uploadDir, safeName), req.file.buffer);
 
-        const result = await uploadStream();
-        student.resumeUrl = result.secure_url;
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+        const host = req.get('host') || `127.0.0.1:${process.env.PORT || 5500}`;
+        student.resumeUrl = `${protocol}://${host}/uploads/resumes/${safeName}`;
         await student.save();
 
         res.json({
@@ -275,10 +273,10 @@ exports.getStudentMe = async (req, res) => {
             .populate('collegeId', 'name code address logoUrl')
             .populate({
                 path: 'batchId',
-                select: 'batchName department program startDate endDate status studentCount trainerId courseId createdAt',
+                select: 'batchName department program startDate endDate status studentCount trainerId courseId materials createdAt',
                 populate: [
                     { path: 'trainerId', select: 'firstName lastName phone email' },
-                    { path: 'courseId', select: 'name code description duration modulesCount program status syllabusUrl' }
+                    { path: 'courseId', select: 'name code description duration modulesCount program status syllabusUrl materials' }
                 ]
             });
 
@@ -578,6 +576,63 @@ exports.deleteStudentTodoPermanently = async (req, res) => {
         }
 
         res.json({ success: true, message: 'Task deleted permanently' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// @desc    Get study materials for student's mapped batch (Uploaded by Teacher) & mapped course (LMS)
+// @route   GET /api/student/study-materials
+// @access  Private (Student)
+exports.getStudentStudyMaterials = async (req, res) => {
+    try {
+        // Auto-remove any legacy broken Cloudinary PDF entries from earlier test uploads
+        await Batch.updateMany(
+            { 'materials.fileUrl': { $regex: /res\.cloudinary\.com.*qms_study_materials/i } },
+            { $pull: { materials: { fileUrl: { $regex: /res\.cloudinary\.com.*qms_study_materials/i } } } }
+        );
+
+        const student = await Student.findById(req.student._id)
+            .populate({
+                path: 'batchId',
+                select: 'batchName department program status trainerId courseId materials',
+                populate: [
+                    { path: 'trainerId', select: 'firstName lastName email' },
+                    { path: 'courseId', select: 'name code description duration modulesCount program status syllabusUrl materials' }
+                ]
+            });
+
+        if (!student) {
+            return res.status(404).json({ success: false, error: 'Student not found' });
+        }
+
+        const batch = student.batchId || null;
+        const course = batch?.courseId || null;
+        const trainer = batch?.trainerId || null;
+
+        res.json({
+            success: true,
+            data: {
+                batchName: batch?.batchName || '',
+                trainerName: trainer ? `${trainer.firstName || ''} ${trainer.lastName || ''}`.trim() : '',
+                course: course ? {
+                    _id: course._id,
+                    name: course.name,
+                    code: course.code,
+                    description: course.description,
+                    duration: course.duration,
+                    modulesCount: course.modulesCount,
+                    program: course.program,
+                    syllabusUrl: course.syllabusUrl || ''
+                } : null,
+                teacherMaterials: Array.isArray(batch?.materials)
+                    ? [...batch.materials].sort((a, b) => new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0))
+                    : [],
+                lmsMaterials: Array.isArray(course?.materials)
+                    ? [...course.materials].sort((a, b) => new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0))
+                    : []
+            }
+        });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }

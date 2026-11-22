@@ -33,7 +33,15 @@ const courseSchema = new mongoose.Schema({
         enum: ['active', 'inactive'],
         default: 'active'
     },
-    syllabusUrl: String
+    syllabusUrl: String,
+    materials: [{
+        title: String,
+        module: String,
+        type: { type: String, default: 'PDF' },
+        fileUrl: String,
+        description: String,
+        uploadedAt: { type: Date, default: Date.now }
+    }]
 }, {
     timestamps: true
 });
