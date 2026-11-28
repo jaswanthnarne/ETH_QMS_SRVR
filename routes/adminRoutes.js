@@ -16,7 +16,7 @@ const {
 } = require('../controllers/collegeCourseController');
 const {
     getStudentsByBatch, getStudentsByCollege, createStudent, importStudents, downloadTemplate, updateStudent, deleteStudent,
-    parseStudentsExcel, importStudentsList, resetStudentPassword
+    parseStudentsExcel, importStudentsList, resetStudentPassword, searchPlatformUsers, getUser360Profile
 } = require('../controllers/studentController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const multer = require('multer');
@@ -161,6 +161,10 @@ router.get('/certificate/:attemptId', async (req, res) => {
 
 // Training Logs (Admin access)
 router.get('/training-logs', authorize(...ALL_ADMINS), getAdminTrainingLogs);
+
+// Unified Search User (Global Admin / Ops Admin: entire project; College Tab: college-scoped; Trainer: trainer's assigned batches)
+router.get('/search-users', authorize(...ALL_ADMINS, 'trainer'), searchPlatformUsers);
+router.get('/search-users/:entityType/:id', authorize(...ALL_ADMINS, 'trainer'), getUser360Profile);
 
 // User Accounts Management (Super Admin & Ops Admin only)
 router.get('/users', authorize('super_admin', 'ops_admin'), getAdminUsers);

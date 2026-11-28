@@ -7,6 +7,7 @@ const Batch = require('../models/Batch');
 const AttendanceSession = require('../models/AttendanceSession');
 const Todo = require('../models/Todo');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const cloudinary = require('cloudinary').v2;
 
 // Configure Cloudinary using existing environment keys
@@ -16,8 +17,8 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-const generateToken = (id) => {
-    return jwt.sign({ id }, process.env.JWT_SECRET, {
+const generateToken = (id, sessionId) => {
+    return jwt.sign({ id, sessionId }, process.env.JWT_SECRET, {
         expiresIn: process.env.JWT_EXPIRE || '30d'
     });
 };
@@ -85,6 +86,22 @@ exports.loginStudent = async (req, res) => {
             return res.status(401).json({ success: false, error: 'Invalid credentials. Incorrect password.' });
         }
 
+        // Enforce Max 1 Active Login Per Student: generate new sessionId & evict any previous session
+        const newSessionId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+        const hadExistingSession = Boolean(student.activeSessionId);
+        await Student.findByIdAndUpdate(student._id, { activeSessionId: newSessionId });
+
+        const io = req.app.get('socketio');
+        if (io && hadExistingSession) {
+            io.to(`auth_session_${student._id.toString()}`).emit('session_replaced', {
+                userId: student._id.toString(),
+                newSessionId,
+                role: 'student',
+                code: 'SESSION_REPLACED',
+                timestamp: new Date()
+            });
+        }
+
         res.json({
             success: true,
             _id: student._id,
@@ -104,7 +121,8 @@ exports.loginStudent = async (req, res) => {
             resumeUrl: student.resumeUrl || '',
             cgpa: student.cgpa || 0,
             backlogs: student.backlogs || 0,
-            token: generateToken(student._id)
+            sessionId: newSessionId,
+            token: generateToken(student._id, newSessionId)
         });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });

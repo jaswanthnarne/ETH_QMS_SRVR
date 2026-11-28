@@ -32,6 +32,7 @@ router.post('/setup-password', setupStudentPassword);
 
 // Protected routes
 router.use(protectStudent);
+router.get('/session-check', (req, res) => res.json({ success: true, activeSessionId: req.student?.activeSessionId || null }));
 router.get('/me', getStudentMe);
 router.put('/change-password', changeStudentPassword);
 router.put('/profile', updateStudentProfile);

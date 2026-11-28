@@ -43,9 +43,16 @@ const batchSchema = new mongoose.Schema({
         title: { type: String, required: true },
         module: { type: String, default: 'General' },
         type: { type: String, default: 'PDF Notes' },
-        fileUrl: { type: String, required: true },
+        fileUrl: { type: String, default: '' },
         fileName: String,
         description: String,
+        textContent: { type: String, default: '' },
+        sections: [{
+            heading: String,
+            points: [String],
+            code: String
+        }],
+        practice: [String],
         uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
         uploadedByName: String,
         uploadedAt: { type: Date, default: Date.now }

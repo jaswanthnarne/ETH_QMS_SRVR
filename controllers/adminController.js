@@ -1998,21 +1998,37 @@ exports.getAdminTrainingLogs = async (req, res) => {
     try {
         const AttendanceSession = require('../models/AttendanceSession');
         let filter = {};
-        if (req.user.role === 'college_admin') {
+        const role = req.user.role;
+        const isRegionalRole = ['regional_manager', 'asst_rm', 'placement'].includes(role);
+        const allowedColleges = isRegionalRole
+            ? [
+                  ...(req.user.collegeId ? [req.user.collegeId.toString()] : []),
+                  ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges.map((c) => c.toString()) : [])
+              ]
+            : [];
+
+        const targetCollegeId = req.query.collegeId;
+
+        if (role === 'college_admin') {
             filter.collegeId = req.user.collegeId;
-        } else if (req.user.role === 'super_admin') {
-            const targetCollegeId = req.query.collegeId;
-            if (targetCollegeId && targetCollegeId !== 'all') {
-                filter.collegeId = targetCollegeId;
+        } else if (targetCollegeId && targetCollegeId !== 'all') {
+            if (isRegionalRole && allowedColleges.length > 0 && !allowedColleges.includes(targetCollegeId.toString())) {
+                return res.status(403).json({ success: false, error: 'Not authorized for this college scope' });
             }
+            filter.collegeId = targetCollegeId;
+        } else if (isRegionalRole && allowedColleges.length > 0) {
+            filter.collegeId = { $in: allowedColleges };
         }
 
-        const { trainerId, courseId } = req.query;
+        const { trainerId, courseId, batchId } = req.query;
         if (trainerId && trainerId !== 'all') {
             filter.trainerId = trainerId;
         }
         if (courseId && courseId !== 'all') {
             filter.courseId = courseId;
+        }
+        if (batchId && batchId !== 'all') {
+            filter.batchId = batchId;
         }
 
         const sessions = await AttendanceSession.find(filter)

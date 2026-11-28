@@ -282,7 +282,7 @@ exports.getBatchAttendanceReport = async (req, res) => {
 
             // Count late as present (or customize if late counts as partial attendance)
             const attendedCount = presentCount + lateCount;
-            const attendancePercentage = totalSessions > 0 ? Math.round((attendedCount / totalSessions) * 100) : 100;
+            const attendancePercentage = totalSessions > 0 ? Math.round((attendedCount / totalSessions) * 100) : 0;
 
             return {
                 studentId: student._id,
@@ -354,7 +354,7 @@ exports.getStudentAttendanceReport = async (req, res) => {
 
         const totalSessions = sessions.length;
         const attended = history.filter(h => h.status === 'present' || h.status === 'late').length;
-        const percentage = totalSessions > 0 ? Math.round((attended / totalSessions) * 100) : 100;
+        const percentage = totalSessions > 0 ? Math.round((attended / totalSessions) * 100) : 0;
 
         res.json({
             success: true,
@@ -434,7 +434,7 @@ exports.getBatchDaywiseReport = async (req, res) => {
             });
 
             const attendedCount = presentCount + lateCount;
-            const percentage = totalSessions > 0 ? Math.round((attendedCount / totalSessions) * 100) : 100;
+            const percentage = totalSessions > 0 ? Math.round((attendedCount / totalSessions) * 100) : 0;
 
             return {
                 studentId: student._id,

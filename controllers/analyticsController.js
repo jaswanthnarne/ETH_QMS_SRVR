@@ -250,6 +250,270 @@ exports.exportMasterSheet = async (req, res) => {
     try {
         const { type, id } = req.query;
 
+        if (type === 'batch_attendance') {
+            // Multi-batch or single-batch Day-wise Attendance Summary & Matrix Excel Export
+            const { collegeId: qCollegeId, batchIds: qBatchIds, courseId: qCourseId, trainerId: qTrainerId } = req.query;
+            const role = req.user.role;
+            const isTrainer = role === 'trainer';
+            const isRegionalRole = ['regional_manager', 'asst_rm', 'placement'].includes(role);
+            const allowedColleges = isRegionalRole
+                ? [
+                      ...(req.user.collegeId ? [req.user.collegeId.toString()] : []),
+                      ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges.map((c) => c.toString()) : [])
+                  ]
+                : [];
+
+            const batchQuery = {};
+            if (isTrainer) {
+                batchQuery.trainerId = req.user._id;
+            } else if (qTrainerId && qTrainerId !== 'all') {
+                batchQuery.trainerId = qTrainerId;
+            }
+
+            if (role === 'college_admin') {
+                batchQuery.collegeId = req.user.collegeId;
+            } else if (qCollegeId && qCollegeId !== 'all') {
+                if (isRegionalRole && allowedColleges.length > 0 && !allowedColleges.includes(qCollegeId.toString())) {
+                    return res.status(403).json({ success: false, error: 'Unauthorized college scope' });
+                }
+                batchQuery.collegeId = qCollegeId;
+            } else if (isRegionalRole && allowedColleges.length > 0) {
+                batchQuery.collegeId = { $in: allowedColleges };
+            }
+
+            if (qCourseId && qCourseId !== 'all') {
+                batchQuery.courseId = qCourseId;
+            }
+
+            if (qBatchIds && qBatchIds !== 'all') {
+                const parsedIds = qBatchIds.split(',').map((s) => s.trim()).filter(Boolean);
+                if (parsedIds.length > 0) {
+                    batchQuery._id = { $in: parsedIds };
+                }
+            }
+
+            const targetBatches = await Batch.find(batchQuery)
+                .populate('collegeId', 'name code')
+                .populate('courseId', 'name code program')
+                .populate('trainerId', 'firstName lastName phone employeeId')
+                .sort({ batchName: 1 })
+                .lean();
+
+            const workbook = new ExcelJS.Workbook();
+            workbook.creator = 'Ethnotech Academy';
+            workbook.created = new Date();
+
+            // --- SHEET 1: Day-wise & Batch Attendance Overview ---
+            const overviewSheet = workbook.addWorksheet('Attendance Summary');
+            overviewSheet.columns = [
+                { header: 'Batch Name', key: 'batchName', width: 22 },
+                { header: 'College', key: 'collegeName', width: 32 },
+                { header: 'Course', key: 'courseName', width: 28 },
+                { header: 'Department', key: 'department', width: 16 },
+                { header: 'Trainer', key: 'trainerName', width: 24 },
+                { header: 'Total Students', key: 'totalStudents', width: 15 },
+                { header: 'Sessions Conducted', key: 'totalSessions', width: 18 },
+                { header: 'Total Hours', key: 'totalHours', width: 14 },
+                { header: 'Avg Attendance %', key: 'avgAttendance', width: 18 },
+                { header: 'Students >= 75%', key: 'above75', width: 16 },
+                { header: 'Below 75% (Risk)', key: 'below75', width: 16 }
+            ];
+            styleHeader(overviewSheet);
+
+            // --- SHEET 2: Day-wise Session Log Across Selected Batches ---
+            const daySheet = workbook.addWorksheet('Day-wise Session Summary');
+            daySheet.columns = [
+                { header: 'Session Date', key: 'date', width: 16 },
+                { header: 'Batch Name', key: 'batchName', width: 20 },
+                { header: 'College', key: 'collegeName', width: 28 },
+                { header: 'Course', key: 'courseName', width: 26 },
+                { header: 'Trainer', key: 'trainerName', width: 22 },
+                { header: 'Module', key: 'module', width: 16 },
+                { header: 'Period / Slot', key: 'period', width: 16 },
+                { header: 'Topic Covered', key: 'topic', width: 38 },
+                { header: 'Present', key: 'present', width: 12 },
+                { header: 'Absent', key: 'absent', width: 12 },
+                { header: 'Late', key: 'late', width: 10 },
+                { header: 'Total Roster', key: 'total', width: 14 },
+                { header: 'Attendance %', key: 'percentage', width: 15 }
+            ];
+            styleHeader(daySheet);
+
+            const usedSheetNames = new Set(['Attendance Summary', 'Day-wise Session Summary']);
+            let overviewIdx = 0;
+            let dayIdx = 0;
+
+            for (const b of targetBatches) {
+                const [students, sessions] = await Promise.all([
+                    Student.find({ batchId: b._id, status: 'active' }).sort({ name: 1 }).lean(),
+                    AttendanceSession.find({ batchId: b._id })
+                        .populate('trainerId', 'firstName lastName')
+                        .sort({ date: 1, createdAt: 1 })
+                        .lean()
+                ]);
+
+                const trainerFull = b.trainerId
+                    ? `${b.trainerId.firstName || ''} ${b.trainerId.lastName || ''}`.trim()
+                    : 'Unassigned';
+
+                let batchPresentSum = 0;
+                let batchTotalPossible = 0;
+                let totalMinutes = 0;
+
+                sessions.forEach((sess) => {
+                    totalMinutes += sess.duration || 60;
+                    const recs = sess.records || [];
+                    const pCount = recs.filter((r) => r.status === 'present').length;
+                    const lCount = recs.filter((r) => r.status === 'late').length;
+                    const aCount = recs.filter((r) => r.status === 'absent').length;
+                    const tot = recs.length || students.length;
+                    const attended = pCount + lCount;
+                    batchPresentSum += attended;
+                    batchTotalPossible += tot;
+                    const pct = tot > 0 ? Number(((attended / tot) * 100).toFixed(1)) : 0;
+
+                    const dRow = daySheet.addRow({
+                        date: new Date(sess.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+                        batchName: b.batchName,
+                        collegeName: b.collegeId?.name || '—',
+                        courseName: b.courseId ? `${b.courseId.name} (${b.courseId.code})` : '—',
+                        trainerName: sess.trainerId ? `${sess.trainerId.firstName || ''} ${sess.trainerId.lastName || ''}`.trim() : trainerFull,
+                        module: sess.module || 'Module 1',
+                        period: sess.period || 'Session 1',
+                        topic: sess.topic || '—',
+                        present: pCount,
+                        absent: aCount,
+                        late: lCount,
+                        total: tot,
+                        percentage: `${pct}%`
+                    });
+                    styleDataRow(dRow, dayIdx % 2 === 0);
+                    dayIdx++;
+                });
+
+                // Per-student matrix for this batch
+                let above75Count = 0;
+                let below75Count = 0;
+                const studentRows = students.map((stu) => {
+                    let p = 0;
+                    let a = 0;
+                    let l = 0;
+                    const perSession = {};
+                    sessions.forEach((sess) => {
+                        const r = (sess.records || []).find((x) => x.studentId?.toString() === stu._id.toString());
+                        const st = r ? r.status : 'absent';
+                        perSession[sess._id.toString()] = st;
+                        if (st === 'present') p++;
+                        else if (st === 'late') l++;
+                        else a++;
+                    });
+                    const attended = p + l;
+                    const pct = sessions.length > 0 ? Math.round((attended / sessions.length) * 100) : 0;
+                    if (pct >= 75) above75Count++;
+                    else below75Count++;
+                    return { stu, p, a, l, attended, pct, perSession };
+                });
+
+                const batchAvgPct = batchTotalPossible > 0
+                    ? Number(((batchPresentSum / batchTotalPossible) * 100).toFixed(1))
+                    : 0;
+
+                const oRow = overviewSheet.addRow({
+                    batchName: b.batchName,
+                    collegeName: b.collegeId?.name || '—',
+                    courseName: b.courseId ? `${b.courseId.name} (${b.courseId.code})` : '—',
+                    department: b.department || '—',
+                    trainerName: trainerFull,
+                    totalStudents: students.length,
+                    totalSessions: sessions.length,
+                    totalHours: Number((totalMinutes / 60).toFixed(1)),
+                    avgAttendance: `${batchAvgPct}%`,
+                    above75: above75Count,
+                    below75: below75Count
+                });
+                styleDataRow(oRow, overviewIdx % 2 === 0);
+                overviewIdx++;
+
+                // Individual Batch Day-Wise Matrix Sheet
+                let baseName = `${b.batchName}_${b.collegeId?.code || ''}`.replace(/[\\/*?:\[\]]/g, '').trim().substring(0, 28) || 'Batch';
+                let sheetName = baseName;
+                let counter = 1;
+                while (usedSheetNames.has(sheetName)) {
+                    sheetName = `${baseName.substring(0, 26)}_${counter++}`;
+                }
+                usedSheetNames.add(sheetName);
+
+                const bSheet = workbook.addWorksheet(sheetName);
+                const titleRow = bSheet.addRow([
+                    `Day-Wise Attendance Register — ${b.batchName} (${b.collegeId?.name || ''})`
+                ]);
+                titleRow.font = { bold: true, size: 13, color: { argb: 'FF5899B5' } };
+                bSheet.mergeCells(1, 1, 1, Math.max(7, 4 + sessions.length + 3));
+                titleRow.height = 26;
+
+                const subRow = bSheet.addRow([
+                    `Course: ${b.courseId?.name || '—'}  |  Department: ${b.department || '—'}  |  Trainer: ${trainerFull}  |  Sessions: ${sessions.length}  |  Avg Attendance: ${batchAvgPct}%`
+                ]);
+                subRow.font = { size: 9.5, italic: true, color: { argb: 'FF475569' } };
+                bSheet.mergeCells(2, 1, 2, Math.max(7, 4 + sessions.length + 3));
+
+                bSheet.addRow([]);
+
+                const matrixHeaders = [
+                    'S.No',
+                    'Student Name',
+                    'USN',
+                    'Department',
+                    ...sessions.map((s) =>
+                        new Date(s.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+                    ),
+                    'Total P',
+                    'Total A',
+                    'Attendance %'
+                ];
+                const hRow = bSheet.addRow(matrixHeaders);
+                hRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+                hRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5899B5' } };
+                hRow.alignment = { vertical: 'middle', horizontal: 'center' };
+                hRow.height = 26;
+
+                const statusMap = { present: 'P', absent: 'A', late: 'L', excused: 'E' };
+                studentRows.forEach((sr, sIdx) => {
+                    const rVals = [
+                        sIdx + 1,
+                        sr.stu.name,
+                        sr.stu.usn,
+                        sr.stu.department || b.department || '—',
+                        ...sessions.map((s) => statusMap[sr.perSession[s._id.toString()]] || 'A'),
+                        sr.attended,
+                        sr.a,
+                        `${sr.pct}%`
+                    ];
+                    const row = bSheet.addRow(rVals);
+                    styleDataRow(row, sIdx % 2 === 0);
+                });
+
+                bSheet.getColumn(1).width = 6;
+                bSheet.getColumn(2).width = 26;
+                bSheet.getColumn(3).width = 18;
+                bSheet.getColumn(4).width = 14;
+                sessions.forEach((_, idx) => {
+                    bSheet.getColumn(5 + idx).width = 10;
+                });
+                bSheet.getColumn(5 + sessions.length).width = 10;
+                bSheet.getColumn(6 + sessions.length).width = 10;
+                bSheet.getColumn(7 + sessions.length).width = 14;
+            }
+
+            const buffer = await workbook.xlsx.writeBuffer();
+            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            res.setHeader(
+                'Content-Disposition',
+                `attachment; filename="Batch_Daywise_Attendance_Report_${new Date().toISOString().slice(0, 10)}.xlsx"`
+            );
+            return res.send(buffer);
+        }
+
         if (type === 'training_logs') {
             let filter = {};
             let collegeName = 'Overall Platform';
@@ -1344,7 +1608,7 @@ exports.exportMasterSheet = async (req, res) => {
 
                     const attendedCount = presentCount + lateCount;
                     const totalSessionsCount = sessions.length;
-                    const rate = totalSessionsCount > 0 ? Math.round((attendedCount / totalSessionsCount) * 100) : 100;
+                    const rate = totalSessionsCount > 0 ? Math.round((attendedCount / totalSessionsCount) * 100) : 0;
 
                     rowData.push(attendedCount);
                     rowData.push(absentCount);
@@ -2386,63 +2650,811 @@ exports.exportMasterSheet = async (req, res) => {
 };
 
 // ========== Leaderboard ==========
-// GET /api/analytics/leaderboard?examId=...&courseId=...&collegeId=...&limit=20
+// GET /api/analytics/leaderboard?examId=...&courseId=...&collegeId=...&batchId=...&department=...&mode=best|average&limit=20
 exports.getLeaderboard = async (req, res) => {
     try {
-        const { examId, courseId, collegeId } = req.query;
-        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+        const {
+            examId,
+            courseId,
+            collegeId: queryCollegeId,
+            batchId,
+            department,
+            mode = 'best' // 'best' | 'average'
+        } = req.query;
+        const limit = Math.min(parseInt(req.query.limit) || 20, 200);
 
-        let examIds = [];
+        const role = req.user.role;
+        const isTrainer = role === 'trainer';
+        const isRegionalRole = ['regional_manager', 'asst_rm', 'placement'].includes(role);
+        const allowedColleges = isRegionalRole
+            ? [
+                  ...(req.user.collegeId ? [req.user.collegeId.toString()] : []),
+                  ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges.map((c) => c.toString()) : [])
+              ]
+            : [];
 
-        if (examId) {
-            examIds = [examId];
-        } else if (courseId) {
-            const exams = await Exam.find({ courseId }).select('_id');
-            examIds = exams.map(e => e._id);
-        } else if (collegeId) {
-            const exams = await Exam.find({ collegeId }).select('_id');
-            examIds = exams.map(e => e._id);
-        } else if (req.user.role === 'college_admin') {
-            const exams = await Exam.find({ collegeId: req.user.collegeId }).select('_id');
-            examIds = exams.map(e => e._id);
-        } else {
-            // Super admin — overall
-            const exams = await Exam.find({}).select('_id');
-            examIds = exams.map(e => e._id);
+        const effectiveCollegeId =
+            role === 'college_admin'
+                ? req.user.collegeId?.toString()
+                : queryCollegeId && queryCollegeId !== 'all'
+                    ? queryCollegeId.toString()
+                    : null;
+
+        // 1. Resolve scoped batches and students so we can filter by batch, department, and college accurately
+        const batchFilter = {};
+        if (isTrainer) {
+            batchFilter.trainerId = req.user._id;
+        }
+        if (effectiveCollegeId) {
+            batchFilter.collegeId = effectiveCollegeId;
+        } else if (isRegionalRole && allowedColleges.length > 0) {
+            batchFilter.collegeId = { $in: allowedColleges };
+        }
+        if (courseId && courseId !== 'all') {
+            batchFilter.courseId = courseId;
+        }
+        if (batchId && batchId !== 'all') {
+            batchFilter._id = batchId;
         }
 
-        const attempts = await StudentAttempt.find({
+        const scopedBatches = await Batch.find(batchFilter)
+            .populate('collegeId', 'name code')
+            .populate('courseId', 'name code program')
+            .sort({ batchName: 1 })
+            .lean();
+
+        // Build student USN lookup map for batch/college/department enrichment & filtering
+        const studentQuery = {};
+        if (batchId && batchId !== 'all') {
+            studentQuery.batchId = batchId;
+        } else if (isTrainer || (courseId && courseId !== 'all')) {
+            studentQuery.batchId = { $in: scopedBatches.map((b) => b._id) };
+        } else if (effectiveCollegeId) {
+            studentQuery.collegeId = effectiveCollegeId;
+        } else if (isRegionalRole && allowedColleges.length > 0) {
+            studentQuery.collegeId = { $in: allowedColleges };
+        }
+        if (department && department !== 'all') {
+            studentQuery.department = new RegExp(`^${department.trim()}$`, 'i');
+        }
+
+        const matchingStudents = await Student.find(studentQuery)
+            .populate('batchId', 'batchName department courseId')
+            .populate('collegeId', 'name code')
+            .lean();
+
+        const studentByUsn = new Map();
+        matchingStudents.forEach((s) => {
+            if (s.usn) {
+                studentByUsn.set(s.usn.trim().toUpperCase(), s);
+            }
+        });
+
+        // 2. Resolve Exam IDs
+        const examQuery = {};
+        if (examId && examId !== 'all') {
+            examQuery._id = examId;
+        } else {
+            if (effectiveCollegeId) {
+                examQuery.collegeId = effectiveCollegeId;
+            } else if (isRegionalRole && allowedColleges.length > 0) {
+                examQuery.collegeId = { $in: allowedColleges };
+            }
+            if (courseId && courseId !== 'all') {
+                examQuery.courseId = courseId;
+            }
+            if (batchId && batchId !== 'all') {
+                examQuery.$or = [
+                    { batches: batchId },
+                    { batches: { $size: 0 } },
+                    { batches: { $exists: false } }
+                ];
+            }
+        }
+
+        const exams = await Exam.find(examQuery)
+            .populate('courseId', 'name code')
+            .populate('collegeId', 'name code')
+            .lean();
+        const examIds = exams.map((e) => e._id);
+        const examMap = new Map(exams.map((e) => [e._id.toString(), e]));
+
+        // Strict student USN filter if batchId, trainer, or department is specified
+        const enforceStudentSet =
+            Boolean(batchId && batchId !== 'all') ||
+            isTrainer ||
+            Boolean(department && department !== 'all');
+
+        const attemptQuery = {
             examId: { $in: examIds },
             status: 'completed'
-        })
-        .populate('examId', 'title totalMarks courseId')
-        .sort({ percentage: -1, totalScore: -1 })
-        .limit(limit * 3); // over-fetch to deduplicate by student
+        };
 
-        // Deduplicate: keep best attempt per student (by rollNumber across all exams)
-        const seen = new Set();
-        const leaderboard = [];
+        const attempts = await StudentAttempt.find(attemptQuery)
+            .sort({ percentage: -1, totalScore: -1, completedAt: 1 })
+            .lean();
+
+        // Group attempts by student rollNumber (USN)
+        const groupedByStudent = new Map();
+
         for (const a of attempts) {
-            const key = a.studentDetails?.rollNumber;
-            if (!key || seen.has(key)) continue;
-            seen.add(key);
-            leaderboard.push({
-                rank: leaderboard.length + 1,
-                name: a.studentDetails?.name || '—',
-                rollNumber: a.studentDetails?.rollNumber || '—',
-                department: a.studentDetails?.department || '—',
-                examTitle: a.examId?.title || '—',
-                score: a.totalScore || 0,
-                totalMarks: a.examId?.totalMarks || 0,
-                percentage: parseFloat((a.percentage || 0).toFixed(2)),
-                result: a.result,
-                completedAt: a.completedAt
-            });
-            if (leaderboard.length >= limit) break;
+            const rawRoll = (a.studentDetails?.rollNumber || '').trim();
+            if (!rawRoll) continue;
+            const normRoll = rawRoll.toUpperCase();
+            const stuDoc = studentByUsn.get(normRoll);
+
+            if (enforceStudentSet && !stuDoc) {
+                continue;
+            }
+
+            const examDoc = examMap.get(a.examId?.toString());
+            const dept = stuDoc?.department || a.studentDetails?.department || '—';
+            if (department && department !== 'all' && dept.toLowerCase() !== department.trim().toLowerCase()) {
+                continue;
+            }
+
+            if (!groupedByStudent.has(normRoll)) {
+                groupedByStudent.set(normRoll, {
+                    name: stuDoc?.name || a.studentDetails?.name || '—',
+                    rollNumber: stuDoc?.usn || rawRoll,
+                    department: dept,
+                    batchId: stuDoc?.batchId?._id || null,
+                    batchName: stuDoc?.batchId?.batchName || '—',
+                    collegeId: stuDoc?.collegeId?._id || examDoc?.collegeId?._id || null,
+                    collegeName: stuDoc?.collegeId?.name || examDoc?.collegeId?.name || a.studentDetails?.college || '—',
+                    collegeCode: stuDoc?.collegeId?.code || examDoc?.collegeId?.code || '',
+                    courseName: examDoc?.courseId?.name || a.studentDetails?.course || '—',
+                    courseCode: examDoc?.courseId?.code || '',
+                    attemptsCount: 0,
+                    passedCount: 0,
+                    totalScoreSum: 0,
+                    totalMarksSum: 0,
+                    percentageSum: 0,
+                    bestAttempt: null
+                });
+            }
+
+            const entry = groupedByStudent.get(normRoll);
+            const maxMarks = examDoc?.totalMarks || 0;
+            const pct = parseFloat((a.percentage || 0).toFixed(2));
+
+            entry.attemptsCount += 1;
+            if (a.result === 'pass') entry.passedCount += 1;
+            entry.totalScoreSum += a.totalScore || 0;
+            entry.totalMarksSum += maxMarks;
+            entry.percentageSum += pct;
+
+            if (
+                !entry.bestAttempt ||
+                pct > entry.bestAttempt.percentage ||
+                (pct === entry.bestAttempt.percentage && (a.totalScore || 0) > entry.bestAttempt.score)
+            ) {
+                entry.bestAttempt = {
+                    examTitle: examDoc?.title || 'Assessment',
+                    courseName: examDoc?.courseId?.name || entry.courseName,
+                    courseCode: examDoc?.courseId?.code || entry.courseCode,
+                    score: a.totalScore || 0,
+                    totalMarks: maxMarks,
+                    percentage: pct,
+                    result: a.result,
+                    completedAt: a.completedAt
+                };
+            }
         }
 
-        res.json({ success: true, count: leaderboard.length, data: leaderboard });
+        // Transform grouped map into sorted leaderboard rows
+        const rows = Array.from(groupedByStudent.values()).map((item) => {
+            const avgPercentage =
+                item.attemptsCount > 0 ? parseFloat((item.percentageSum / item.attemptsCount).toFixed(2)) : 0;
+            const best = item.bestAttempt || {};
+            const useAvg = mode === 'average';
+
+            return {
+                name: item.name,
+                rollNumber: item.rollNumber,
+                department: item.department,
+                batchId: item.batchId,
+                batchName: item.batchName,
+                collegeName: item.collegeName,
+                collegeCode: item.collegeCode,
+                courseName: best.courseName || item.courseName,
+                courseCode: best.courseCode || item.courseCode,
+                examTitle: useAvg
+                    ? `${item.attemptsCount} Exam${item.attemptsCount !== 1 ? 's' : ''} Completed`
+                    : best.examTitle || '—',
+                score: useAvg ? item.totalScoreSum : best.score || 0,
+                totalMarks: useAvg ? item.totalMarksSum : best.totalMarks || 0,
+                percentage: useAvg ? avgPercentage : best.percentage || 0,
+                bestPercentage: best.percentage || 0,
+                avgPercentage,
+                attemptsCount: item.attemptsCount,
+                passedCount: item.passedCount,
+                result: best.result || 'pass',
+                completedAt: best.completedAt
+            };
+        });
+
+        rows.sort((a, b) => {
+            if (b.percentage !== a.percentage) return b.percentage - a.percentage;
+            if (b.score !== a.score) return b.score - a.score;
+            return b.attemptsCount - a.attemptsCount;
+        });
+
+        const leaderboard = rows.slice(0, limit).map((r, idx) => ({
+            rank: idx + 1,
+            ...r
+        }));
+
+        // Distinct departments for filter dropdown
+        const departmentsSet = new Set();
+        matchingStudents.forEach((s) => {
+            if (s.department && s.department.trim()) departmentsSet.add(s.department.trim().toUpperCase());
+        });
+        rows.forEach((r) => {
+            if (r.department && r.department !== '—') departmentsSet.add(r.department.trim().toUpperCase());
+        });
+
+        res.json({
+            success: true,
+            count: leaderboard.length,
+            totalQualified: rows.length,
+            filters: {
+                departments: Array.from(departmentsSet).sort()
+            },
+            data: leaderboard
+        });
     } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ========== Training Logs & Attendance Analytics (Dedicated Analytics Page Endpoint) ==========
+// GET /api/analytics/logs-attendance-stats?collegeId=...&courseId=...&trainerId=...&batchId=...&days=30
+exports.getLogsAttendanceAnalytics = async (req, res) => {
+    try {
+        const role = req.user.role;
+        const isTrainer = role === 'trainer';
+        const isRegionalRole = ['regional_manager', 'asst_rm', 'placement'].includes(role);
+        const allowedColleges = isRegionalRole
+            ? [
+                  ...(req.user.collegeId ? [req.user.collegeId.toString()] : []),
+                  ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges.map((c) => c.toString()) : [])
+              ]
+            : [];
+
+        const {
+            collegeId: queryCollegeId,
+            courseId,
+            trainerId: queryTrainerId,
+            batchId,
+            days = '30'
+        } = req.query;
+
+        const effectiveCollegeId =
+            role === 'college_admin'
+                ? req.user.collegeId?.toString()
+                : queryCollegeId && queryCollegeId !== 'all'
+                    ? queryCollegeId.toString()
+                    : null;
+
+        if (effectiveCollegeId && isRegionalRole && allowedColleges.length > 0 && !allowedColleges.includes(effectiveCollegeId)) {
+            return res.status(403).json({ success: false, error: 'Not authorized for this college context' });
+        }
+
+        // Build session query
+        const sessionQuery = {};
+        if (isTrainer) {
+            sessionQuery.trainerId = req.user._id;
+        } else if (queryTrainerId && queryTrainerId !== 'all') {
+            sessionQuery.trainerId = queryTrainerId;
+        }
+
+        if (effectiveCollegeId) {
+            sessionQuery.collegeId = effectiveCollegeId;
+        } else if (isRegionalRole && allowedColleges.length > 0) {
+            sessionQuery.collegeId = { $in: allowedColleges };
+        }
+
+        if (courseId && courseId !== 'all') {
+            sessionQuery.courseId = courseId;
+        }
+        if (batchId && batchId !== 'all') {
+            sessionQuery.batchId = batchId;
+        }
+
+        if (days && days !== 'all') {
+            const numDays = parseInt(days) || 30;
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - numDays);
+            cutoff.setHours(0, 0, 0, 0);
+            sessionQuery.date = { $gte: cutoff };
+        }
+
+        // Scoped batches query
+        const batchQuery = {};
+        if (isTrainer) batchQuery.trainerId = req.user._id;
+        else if (queryTrainerId && queryTrainerId !== 'all') batchQuery.trainerId = queryTrainerId;
+        if (effectiveCollegeId) batchQuery.collegeId = effectiveCollegeId;
+        else if (isRegionalRole && allowedColleges.length > 0) batchQuery.collegeId = { $in: allowedColleges };
+        if (courseId && courseId !== 'all') batchQuery.courseId = courseId;
+        if (batchId && batchId !== 'all') batchQuery._id = batchId;
+
+        const [sessions, scopedBatches] = await Promise.all([
+            AttendanceSession.find(sessionQuery)
+                .populate('trainerId', 'firstName lastName username phone employeeId')
+                .populate('collegeId', 'name code')
+                .populate('courseId', 'name code program modulesCount')
+                .populate('batchId', 'batchName department program studentCount')
+                .sort({ date: -1, createdAt: -1 })
+                .lean(),
+            Batch.find(batchQuery)
+                .populate('collegeId', 'name code')
+                .populate('courseId', 'name code program modulesCount')
+                .populate('trainerId', 'firstName lastName username phone')
+                .sort({ batchName: 1 })
+                .lean()
+        ]);
+
+        const scopedBatchIds = scopedBatches.map((b) => b._id);
+        const activeStudents = await Student.find({
+            batchId: { $in: scopedBatchIds },
+            status: 'active'
+        })
+            .select('_id name usn batchId department')
+            .lean();
+
+        // 1. Compute Overall Summary Metrics
+        const totalSessionsLogged = sessions.length;
+        const totalMinutesLogged = sessions.reduce((acc, s) => acc + (Number(s.duration) || 60), 0);
+        const totalTrainingHours = Number((totalMinutesLogged / 60).toFixed(1));
+
+        let totalPresentMarks = 0;
+        let totalAbsentMarks = 0;
+        let totalLateMarks = 0;
+        let totalExcusedMarks = 0;
+        let totalStudentSlots = 0;
+
+        // Track per-student attendance across all sessions in the selected window
+        const perStudentTracker = new Map();
+        activeStudents.forEach((stu) => {
+            perStudentTracker.set(stu._id.toString(), {
+                studentId: stu._id,
+                name: stu.name,
+                usn: stu.usn,
+                batchId: stu.batchId?.toString(),
+                department: stu.department || '—',
+                conducted: 0,
+                attended: 0,
+                absent: 0
+            });
+        });
+
+        sessions.forEach((sess) => {
+            const recs = sess.records || [];
+            recs.forEach((r) => {
+                totalStudentSlots += 1;
+                if (r.status === 'present') totalPresentMarks += 1;
+                else if (r.status === 'late') totalLateMarks += 1;
+                else if (r.status === 'excused') totalExcusedMarks += 1;
+                else totalAbsentMarks += 1;
+
+                const sid = r.studentId?.toString();
+                if (sid && perStudentTracker.has(sid)) {
+                    const st = perStudentTracker.get(sid);
+                    st.conducted += 1;
+                    if (r.status === 'present' || r.status === 'late') st.attended += 1;
+                    else st.absent += 1;
+                }
+            });
+        });
+
+        const totalAttendedMarks = totalPresentMarks + totalLateMarks;
+        const overallAttendanceRate =
+            totalStudentSlots > 0 ? Number(((totalAttendedMarks / totalStudentSlots) * 100).toFixed(1)) : 0;
+
+        // Calculate student attendance distribution & below 75% risk count
+        let below75Count = 0;
+        const distBuckets = {
+            '90-100% (Excellent)': 0,
+            '75-89% (Good)': 0,
+            '60-74% (At Risk)': 0,
+            'Below 60% (Critical)': 0
+        };
+
+        perStudentTracker.forEach((st) => {
+            if (st.conducted === 0) return;
+            const pct = Math.round((st.attended / st.conducted) * 100);
+            if (pct < 75) below75Count += 1;
+            if (pct >= 90) distBuckets['90-100% (Excellent)'] += 1;
+            else if (pct >= 75) distBuckets['75-89% (Good)'] += 1;
+            else if (pct >= 60) distBuckets['60-74% (At Risk)'] += 1;
+            else distBuckets['Below 60% (Critical)'] += 1;
+        });
+
+        const attendanceDistribution = Object.entries(distBuckets).map(([range, count]) => ({
+            range,
+            count
+        }));
+
+        // 2. Day-wise Timeline (Sessions Logged, Present, Absent, Attendance %)
+        const dayMap = new Map();
+        const timelineWindow = days === 'all' ? 14 : Math.min(parseInt(days) || 14, 30);
+        for (let i = timelineWindow - 1; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const key = d.toISOString().slice(0, 10);
+            const label = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+            dayMap.set(key, {
+                dateKey: key,
+                name: label,
+                sessions: 0,
+                hours: 0,
+                present: 0,
+                absent: 0,
+                total: 0,
+                attendanceRate: 0
+            });
+        }
+
+        sessions.forEach((sess) => {
+            const key = new Date(sess.date).toISOString().slice(0, 10);
+            if (!dayMap.has(key)) {
+                const d = new Date(sess.date);
+                dayMap.set(key, {
+                    dateKey: key,
+                    name: d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+                    sessions: 0,
+                    hours: 0,
+                    present: 0,
+                    absent: 0,
+                    total: 0,
+                    attendanceRate: 0
+                });
+            }
+            const entry = dayMap.get(key);
+            const recs = sess.records || [];
+            const p = recs.filter((r) => r.status === 'present' || r.status === 'late').length;
+            const a = recs.filter((r) => r.status === 'absent').length;
+            entry.sessions += 1;
+            entry.hours = Number((entry.hours + (Number(sess.duration) || 60) / 60).toFixed(1));
+            entry.present += p;
+            entry.absent += a;
+            entry.total += recs.length;
+        });
+
+        const timeline = Array.from(dayMap.values())
+            .sort((a, b) => a.dateKey.localeCompare(b.dateKey))
+            .slice(-timelineWindow)
+            .map((d) => ({
+                ...d,
+                attendanceRate: d.total > 0 ? Number(((d.present / d.total) * 100).toFixed(1)) : 0
+            }));
+
+        // 3. Batch-wise Training Logs & Attendance Breakdown
+        const batchStatsMap = new Map();
+        scopedBatches.forEach((b) => {
+            batchStatsMap.set(b._id.toString(), {
+                batchId: b._id,
+                batchName: b.batchName,
+                department: b.department || '—',
+                collegeId: b.collegeId?._id || b.collegeId,
+                collegeName: b.collegeId?.name || '—',
+                collegeCode: b.collegeId?.code || '',
+                courseName: b.courseId?.name || '—',
+                courseCode: b.courseId?.code || '',
+                trainerName: b.trainerId
+                    ? `${b.trainerId.firstName || ''} ${b.trainerId.lastName || ''}`.trim()
+                    : 'Unassigned',
+                studentCount: activeStudents.filter((s) => s.batchId?.toString() === b._id.toString()).length,
+                sessionsLogged: 0,
+                hoursLogged: 0,
+                presentSum: 0,
+                totalSum: 0,
+                modulesCovered: new Set(),
+                lastSessionDate: null
+            });
+        });
+
+        sessions.forEach((sess) => {
+            const bid = (sess.batchId?._id || sess.batchId)?.toString();
+            if (!bid) return;
+            if (!batchStatsMap.has(bid)) {
+                batchStatsMap.set(bid, {
+                    batchId: bid,
+                    batchName: sess.batchId?.batchName || 'Batch',
+                    department: sess.batchId?.department || '—',
+                    collegeId: sess.collegeId?._id || sess.collegeId,
+                    collegeName: sess.collegeId?.name || '—',
+                    collegeCode: sess.collegeId?.code || '',
+                    courseName: sess.courseId?.name || '—',
+                    courseCode: sess.courseId?.code || '',
+                    trainerName: sess.trainerId
+                        ? `${sess.trainerId.firstName || ''} ${sess.trainerId.lastName || ''}`.trim()
+                        : 'Trainer',
+                    studentCount: sess.records?.length || 0,
+                    sessionsLogged: 0,
+                    hoursLogged: 0,
+                    presentSum: 0,
+                    totalSum: 0,
+                    modulesCovered: new Set(),
+                    lastSessionDate: null
+                });
+            }
+            const bEntry = batchStatsMap.get(bid);
+            const recs = sess.records || [];
+            const p = recs.filter((r) => r.status === 'present' || r.status === 'late').length;
+            bEntry.sessionsLogged += 1;
+            bEntry.hoursLogged = Number((bEntry.hoursLogged + (Number(sess.duration) || 60) / 60).toFixed(1));
+            bEntry.presentSum += p;
+            bEntry.totalSum += recs.length;
+            if (sess.module) bEntry.modulesCovered.add(sess.module);
+            if (!bEntry.lastSessionDate || new Date(sess.date) > new Date(bEntry.lastSessionDate)) {
+                bEntry.lastSessionDate = sess.date;
+            }
+        });
+
+        const batchesBreakdown = Array.from(batchStatsMap.values()).map((b) => ({
+            ...b,
+            modulesCount: b.modulesCovered.size,
+            modulesList: Array.from(b.modulesCovered),
+            attendanceRate: b.totalSum > 0 ? Number(((b.presentSum / b.totalSum) * 100).toFixed(1)) : 0
+        }));
+
+        // 4. Trainer Session Logging & Attendance Efficacy
+        const trainerStatsMap = new Map();
+        sessions.forEach((sess) => {
+            const tid = (sess.trainerId?._id || sess.trainerId)?.toString() || 'system';
+            if (!trainerStatsMap.has(tid)) {
+                trainerStatsMap.set(tid, {
+                    trainerId: tid,
+                    name: sess.trainerId
+                        ? `${sess.trainerId.firstName || ''} ${sess.trainerId.lastName || ''}`.trim() ||
+                          sess.trainerId.username
+                        : 'System',
+                    phone: sess.trainerId?.phone || '',
+                    sessionsLogged: 0,
+                    hoursLogged: 0,
+                    batchesHandled: new Set(),
+                    coursesHandled: new Set(),
+                    presentSum: 0,
+                    totalSum: 0,
+                    lastLoggedAt: sess.date
+                });
+            }
+            const tEntry = trainerStatsMap.get(tid);
+            const recs = sess.records || [];
+            const p = recs.filter((r) => r.status === 'present' || r.status === 'late').length;
+            tEntry.sessionsLogged += 1;
+            tEntry.hoursLogged = Number((tEntry.hoursLogged + (Number(sess.duration) || 60) / 60).toFixed(1));
+            if (sess.batchId?._id) tEntry.batchesHandled.add(sess.batchId._id.toString());
+            if (sess.courseId?._id) tEntry.coursesHandled.add(sess.courseId._id.toString());
+            tEntry.presentSum += p;
+            tEntry.totalSum += recs.length;
+            if (new Date(sess.date) > new Date(tEntry.lastLoggedAt)) {
+                tEntry.lastLoggedAt = sess.date;
+            }
+        });
+
+        const trainersBreakdown = Array.from(trainerStatsMap.values())
+            .map((t) => ({
+                trainerId: t.trainerId,
+                name: t.name,
+                phone: t.phone,
+                sessionsLogged: t.sessionsLogged,
+                hoursLogged: t.hoursLogged,
+                batchesCount: t.batchesHandled.size,
+                coursesCount: t.coursesHandled.size,
+                attendanceRate: t.totalSum > 0 ? Number(((t.presentSum / t.totalSum) * 100).toFixed(1)) : 0,
+                lastLoggedAt: t.lastLoggedAt
+            }))
+            .sort((a, b) => b.sessionsLogged - a.sessionsLogged);
+
+        // 5. Recent Training Log Sessions (for live drilldown table)
+        const recentSessions = sessions.slice(0, 25).map((sess) => {
+            const recs = sess.records || [];
+            const p = recs.filter((r) => r.status === 'present' || r.status === 'late').length;
+            const a = recs.filter((r) => r.status === 'absent').length;
+            const tot = recs.length;
+            return {
+                _id: sess._id,
+                date: sess.date,
+                batchId: sess.batchId?._id || sess.batchId,
+                batchName: sess.batchId?.batchName || '—',
+                department: sess.batchId?.department || '—',
+                collegeName: sess.collegeId?.name || '—',
+                collegeCode: sess.collegeId?.code || '',
+                courseName: sess.courseId?.name || '—',
+                courseCode: sess.courseId?.code || '',
+                trainerName: sess.trainerId
+                    ? `${sess.trainerId.firstName || ''} ${sess.trainerId.lastName || ''}`.trim()
+                    : '—',
+                module: sess.module || 'Module 1',
+                period: sess.period || 'Session 1',
+                duration: sess.duration || 60,
+                topic: sess.topic || '—',
+                presentCount: p,
+                absentCount: a,
+                totalCount: tot,
+                attendanceRate: tot > 0 ? Number(((p / tot) * 100).toFixed(1)) : 0
+            };
+        });
+
+        res.json({
+            success: true,
+            data: {
+                summary: {
+                    totalSessionsLogged,
+                    totalTrainingHours,
+                    overallAttendanceRate,
+                    totalActiveStudents: activeStudents.length,
+                    totalBatches: scopedBatches.length,
+                    totalPresentMarks: totalAttendedMarks,
+                    totalAbsentMarks,
+                    below75Count
+                },
+                timeline,
+                attendanceDistribution,
+                batches: batchesBreakdown,
+                trainers: trainersBreakdown,
+                recentSessions
+            }
+        });
+    } catch (error) {
+        console.error('getLogsAttendanceAnalytics error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ========== Batch & Day-Wise Attendance Summary for Reports Page ==========
+// GET /api/analytics/attendance-summary?collegeId=...&courseId=...&trainerId=...&batchIds=...
+exports.getAttendanceSummaryReport = async (req, res) => {
+    try {
+        const { collegeId: qCollegeId, courseId: qCourseId, trainerId: qTrainerId, batchIds: qBatchIds } = req.query;
+        const role = req.user.role;
+        const isTrainer = role === 'trainer';
+        const isRegionalRole = ['regional_manager', 'asst_rm', 'placement'].includes(role);
+        const allowedColleges = isRegionalRole
+            ? [
+                  ...(req.user.collegeId ? [req.user.collegeId.toString()] : []),
+                  ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges.map((c) => c.toString()) : [])
+              ]
+            : [];
+
+        const batchQuery = {};
+        if (isTrainer) {
+            batchQuery.trainerId = req.user._id;
+        } else if (qTrainerId && qTrainerId !== 'all') {
+            batchQuery.trainerId = qTrainerId;
+        }
+
+        if (role === 'college_admin') {
+            batchQuery.collegeId = req.user.collegeId;
+        } else if (qCollegeId && qCollegeId !== 'all') {
+            if (isRegionalRole && allowedColleges.length > 0 && !allowedColleges.includes(qCollegeId.toString())) {
+                return res.status(403).json({ success: false, error: 'Unauthorized college scope' });
+            }
+            batchQuery.collegeId = qCollegeId;
+        } else if (isRegionalRole && allowedColleges.length > 0) {
+            batchQuery.collegeId = { $in: allowedColleges };
+        }
+
+        if (qCourseId && qCourseId !== 'all') {
+            batchQuery.courseId = qCourseId;
+        }
+
+        if (qBatchIds && qBatchIds !== 'all') {
+            const ids = qBatchIds.split(',').map((s) => s.trim()).filter(Boolean);
+            if (ids.length > 0) batchQuery._id = { $in: ids };
+        }
+
+        const batches = await Batch.find(batchQuery)
+            .populate('collegeId', 'name code')
+            .populate('courseId', 'name code program')
+            .populate('trainerId', 'firstName lastName phone employeeId')
+            .sort({ batchName: 1 })
+            .lean();
+
+        const batchIdsList = batches.map((b) => b._id);
+
+        const [sessions, students] = await Promise.all([
+            AttendanceSession.find({ batchId: { $in: batchIdsList } })
+                .populate('trainerId', 'firstName lastName')
+                .populate('batchId', 'batchName department')
+                .populate('collegeId', 'name code')
+                .populate('courseId', 'name code')
+                .sort({ date: -1, createdAt: -1 })
+                .lean(),
+            Student.find({ batchId: { $in: batchIdsList }, status: 'active' })
+                .select('_id name usn batchId department')
+                .lean()
+        ]);
+
+        const batchSummaryList = batches.map((b) => {
+            const bSessions = sessions.filter((s) => (s.batchId?._id || s.batchId)?.toString() === b._id.toString());
+            const bStudents = students.filter((s) => s.batchId?.toString() === b._id.toString());
+
+            let presentSum = 0;
+            let absentSum = 0;
+            let lateSum = 0;
+            let totalMarks = 0;
+            let totalMinutes = 0;
+
+            // Day-wise session array for this batch
+            const daywiseSessions = bSessions.map((sess) => {
+                const recs = sess.records || [];
+                const p = recs.filter((r) => r.status === 'present').length;
+                const l = recs.filter((r) => r.status === 'late').length;
+                const a = recs.filter((r) => r.status === 'absent').length;
+                const tot = recs.length;
+                presentSum += p + l;
+                absentSum += a;
+                lateSum += l;
+                totalMarks += tot;
+                totalMinutes += Number(sess.duration) || 60;
+
+                return {
+                    sessionId: sess._id,
+                    date: sess.date,
+                    module: sess.module || 'Module 1',
+                    period: sess.period || 'Session 1',
+                    duration: sess.duration || 60,
+                    topic: sess.topic || '—',
+                    trainerName: sess.trainerId
+                        ? `${sess.trainerId.firstName || ''} ${sess.trainerId.lastName || ''}`.trim()
+                        : '—',
+                    presentCount: p + l,
+                    absentCount: a,
+                    lateCount: l,
+                    totalCount: tot,
+                    attendanceRate: tot > 0 ? Number((((p + l) / tot) * 100).toFixed(1)) : 0
+                };
+            });
+
+            // Per student risk count
+            let below75Count = 0;
+            if (bSessions.length > 0) {
+                bStudents.forEach((stu) => {
+                    let stuAttended = 0;
+                    bSessions.forEach((sess) => {
+                        const r = (sess.records || []).find((x) => x.studentId?.toString() === stu._id.toString());
+                        if (r && (r.status === 'present' || r.status === 'late')) stuAttended++;
+                    });
+                    const pct = Math.round((stuAttended / bSessions.length) * 100);
+                    if (pct < 75) below75Count++;
+                });
+            }
+
+            return {
+                _id: b._id,
+                batchName: b.batchName,
+                department: b.department || '—',
+                program: b.program || b.courseId?.program || 'EWDP',
+                collegeId: b.collegeId?._id || b.collegeId,
+                collegeName: b.collegeId?.name || '—',
+                collegeCode: b.collegeId?.code || '',
+                courseId: b.courseId?._id || b.courseId,
+                courseName: b.courseId?.name || '—',
+                courseCode: b.courseId?.code || '',
+                trainerName: b.trainerId
+                    ? `${b.trainerId.firstName || ''} ${b.trainerId.lastName || ''}`.trim()
+                    : 'Unassigned',
+                studentCount: bStudents.length,
+                totalSessions: bSessions.length,
+                totalHours: Number((totalMinutes / 60).toFixed(1)),
+                avgAttendance: totalMarks > 0 ? Number(((presentSum / totalMarks) * 100).toFixed(1)) : 0,
+                below75Count,
+                lastSessionDate: bSessions[0]?.date || null,
+                daywiseSessions
+            };
+        });
+
+        res.json({
+            success: true,
+            count: batchSummaryList.length,
+            data: batchSummaryList
+        });
+    } catch (error) {
+        console.error('getAttendanceSummaryReport error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 };

@@ -35,7 +35,7 @@ const {
 } = require('../controllers/trainingLogController');
 
 router.use(protect);
-router.use(authorize('trainer'));
+router.use(authorize('trainer', 'super_admin', 'ops_admin', 'ast_ops_admin', 'college_admin'));
 
 router.get('/exams', getAssignedExams);
 router.get('/course-exams', getTrainerExams);

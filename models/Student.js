@@ -54,7 +54,11 @@ const studentSchema = new mongoose.Schema({
             default: 'Any'
         }
     },
-    resumeUrl: String
+    resumeUrl: String,
+    activeSessionId: {
+        type: String,
+        default: null
+    }
 }, {
     timestamps: true
 });

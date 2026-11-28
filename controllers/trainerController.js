@@ -173,19 +173,22 @@ exports.getTrainerStats = async (req, res) => {
     }
 };
 
+const isAdminOverride = (user) => ['super_admin', 'ops_admin', 'ast_ops_admin', 'college_admin'].includes(user?.role);
+
 // GET /api/trainer/waiting-room/:key
 // Returns students currently in waiting room (joined but not yet started, or active)
 exports.getWaitingRoom = async (req, res) => {
     try {
         const { key } = req.params;
-        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id })
+        const keyFilter = isAdminOverride(req.user) ? { uniqueKey: key } : { uniqueKey: key, trainerId: req.user._id };
+        const keyDoc = await TrainerExamKey.findOne(keyFilter)
             .populate({ path: 'examId', populate: [{ path: 'courseId', select: 'name code' }, { path: 'collegeId', select: 'name' }] })
             .lean();
 
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid exam key or not authorized' });
 
         // Find all active keys for this exam by this trainer
-        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId?._id, trainerId: req.user._id, isActive: true })
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId?._id, trainerId: keyDoc.trainerId, isActive: true })
             .select('uniqueKey')
             .lean();
         const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
@@ -265,14 +268,15 @@ exports.getWaitingRoom = async (req, res) => {
 exports.startSession = async (req, res) => {
     try {
         const { key } = req.params;
-        const keyDoc = await TrainerExamKey.findOne(
-            { uniqueKey: key, trainerId: req.user._id, isActive: true }
-        ).populate('examId');
+        const keyFilter = isAdminOverride(req.user)
+            ? { uniqueKey: key, isActive: true }
+            : { uniqueKey: key, trainerId: req.user._id, isActive: true };
+        const keyDoc = await TrainerExamKey.findOne(keyFilter).populate('examId');
 
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
 
         // Update all active keys of this exam for this trainer
-        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId?._id, trainerId: req.user._id, isActive: true });
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId?._id, trainerId: keyDoc.trainerId, isActive: true });
         const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
 
         await TrainerExamKey.updateMany(
@@ -368,8 +372,8 @@ exports.publishTrainerExam = async (req, res) => {
 
         const trainer = await User.findById(req.user._id);
 
-        // Ensure this trainer created the exam
-        if (exam.createdBy.toString() !== req.user._id.toString()) {
+        // Ensure this trainer created the exam (or user is an admin)
+        if (!isAdminOverride(req.user) && exam.createdBy.toString() !== req.user._id.toString()) {
             return res.status(403).json({ success: false, error: 'Not authorized to publish this exam' });
         }
 
@@ -454,11 +458,14 @@ exports.publishTrainerExam = async (req, res) => {
 exports.forceSubmitSession = async (req, res) => {
     try {
         const { key } = req.params;
-        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id, isActive: true });
+        const keyFilter = isAdminOverride(req.user)
+            ? { uniqueKey: key, isActive: true }
+            : { uniqueKey: key, trainerId: req.user._id, isActive: true };
+        const keyDoc = await TrainerExamKey.findOne(keyFilter);
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
 
         // Find all active keys for this exam and trainer
-        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id, isActive: true });
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId, isActive: true });
         const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
 
         const activeAttempts = await StudentAttempt.find({ 
@@ -552,10 +559,11 @@ exports.forceSubmitSession = async (req, res) => {
 exports.pauseSession = async (req, res) => {
     try {
         const { key } = req.params;
-        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id });
+        const keyFilter = isAdminOverride(req.user) ? { uniqueKey: key } : { uniqueKey: key, trainerId: req.user._id };
+        const keyDoc = await TrainerExamKey.findOne(keyFilter);
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
 
-        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id, isActive: true });
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId, isActive: true });
         const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
 
         await TrainerExamKey.updateMany(
@@ -571,10 +579,11 @@ exports.pauseSession = async (req, res) => {
 exports.resumeSession = async (req, res) => {
     try {
         const { key } = req.params;
-        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id });
+        const keyFilter = isAdminOverride(req.user) ? { uniqueKey: key } : { uniqueKey: key, trainerId: req.user._id };
+        const keyDoc = await TrainerExamKey.findOne(keyFilter);
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
 
-        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id, isActive: true });
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId, isActive: true });
         const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
 
         const activeKeys = await TrainerExamKey.find({ _id: { $in: keyIds } });
@@ -598,10 +607,11 @@ exports.resumeSession = async (req, res) => {
 exports.restartSession = async (req, res) => {
     try {
         const { key } = req.params;
-        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id });
+        const keyFilter = isAdminOverride(req.user) ? { uniqueKey: key } : { uniqueKey: key, trainerId: req.user._id };
+        const keyDoc = await TrainerExamKey.findOne(keyFilter);
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
 
-        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id });
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId });
         const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
 
         await TrainerExamKey.updateMany(
@@ -642,7 +652,8 @@ exports.getTrainerCollegesAndCourses = async (req, res) => {
 exports.resetStudentAttempt = async (req, res) => {
     try {
         const { key, attemptId } = req.params;
-        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id });
+        const keyFilter = isAdminOverride(req.user) ? { uniqueKey: key } : { uniqueKey: key, trainerId: req.user._id };
+        const keyDoc = await TrainerExamKey.findOne(keyFilter);
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
 
         const attempt = await StudentAttempt.findById(attemptId);
@@ -668,7 +679,7 @@ exports.resetStudentAttempt = async (req, res) => {
         const io = req.app.get('socketio');
         if (io) {
             // Find all active keys for this exam to cover multi-batch
-            const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id, isActive: true });
+            const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId, isActive: true });
             allKeys.forEach(k => {
                 const roomId = `exam_${k.uniqueKey}`;
                 io.to(roomId).emit('session_ended', { resetRollNumber: rollNumber, timestamp: new Date() });
@@ -685,10 +696,11 @@ exports.addExtraTime = async (req, res) => {
     try {
         const { key } = req.params;
         const { minutes } = req.body;
-        const keyDoc = await TrainerExamKey.findOne({ uniqueKey: key, trainerId: req.user._id });
+        const keyFilter = isAdminOverride(req.user) ? { uniqueKey: key } : { uniqueKey: key, trainerId: req.user._id };
+        const keyDoc = await TrainerExamKey.findOne(keyFilter);
         if (!keyDoc) return res.status(404).json({ success: false, error: 'Invalid or unauthorized exam key' });
 
-        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: req.user._id, isActive: true });
+        const allKeys = await TrainerExamKey.find({ examId: keyDoc.examId, trainerId: keyDoc.trainerId, isActive: true });
         const keyIds = allKeys.map(k => k._id);
 
         await TrainerExamKey.updateMany(
@@ -805,7 +817,7 @@ exports.getTrainerMaterials = async (req, res) => {
 // POST /api/trainer/materials
 exports.uploadTrainerMaterial = async (req, res) => {
     try {
-        const { batchId, title, module, type, description, fileUrl: bodyFileUrl } = req.body;
+        const { batchId, title, module, type, description, textContent, fileUrl: bodyFileUrl } = req.body;
 
         if (!title || !title.trim()) {
             return res.status(400).json({ success: false, error: 'Material title is required' });
@@ -822,8 +834,13 @@ exports.uploadTrainerMaterial = async (req, res) => {
             fileName = req.file.originalname || '';
         }
 
-        if (!finalFileUrl) {
-            return res.status(400).json({ success: false, error: 'Please attach a file or provide a valid resource URL' });
+        const hasTextNotes = Boolean((textContent || '').trim());
+
+        if (!finalFileUrl && !hasTextNotes) {
+            return res.status(400).json({
+                success: false,
+                error: 'Please attach a PDF/file, provide a link, or enter in-site study notes text'
+            });
         }
 
         const batchQuery = {};
@@ -849,6 +866,7 @@ exports.uploadTrainerMaterial = async (req, res) => {
             fileUrl: finalFileUrl,
             fileName,
             description: (description || '').trim(),
+            textContent: (textContent || '').trim(),
             uploadedBy: req.user._id,
             uploadedByName: uploaderName,
             uploadedAt: new Date()
@@ -881,7 +899,7 @@ exports.uploadTrainerMaterial = async (req, res) => {
 exports.updateTrainerMaterial = async (req, res) => {
     try {
         const { batchId, materialId } = req.params;
-        const { title, module, type, description, fileUrl: bodyFileUrl } = req.body;
+        const { title, module, type, description, textContent, fileUrl: bodyFileUrl } = req.body;
 
         const query = { _id: batchId };
         if (req.user.role === 'trainer') query.trainerId = req.user._id;
@@ -900,6 +918,7 @@ exports.updateTrainerMaterial = async (req, res) => {
         if (module !== undefined) mat.module = module.trim() || 'General';
         if (type !== undefined) mat.type = type;
         if (description !== undefined) mat.description = description.trim();
+        if (textContent !== undefined) mat.textContent = textContent.trim();
 
         if (req.file) {
             mat.fileUrl = await uploadMaterialFileHelper(req.file, req);

@@ -39,7 +39,16 @@ const courseSchema = new mongoose.Schema({
         module: String,
         type: { type: String, default: 'PDF' },
         fileUrl: String,
+        fileName: String,
         description: String,
+        textContent: { type: String, default: '' },
+        sections: [{
+            heading: String,
+            points: [String],
+            code: String
+        }],
+        practice: [String],
+        uploadedByName: String,
         uploadedAt: { type: Date, default: Date.now }
     }]
 }, {

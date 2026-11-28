@@ -18,7 +18,10 @@ const connectDB = require('./config/db');
 dotenv.config();
 
 // Connect to database
-connectDB();
+connectDB().then(() => {
+    const { ensureDefaultOpsAdmin } = require('./controllers/authController');
+    ensureDefaultOpsAdmin();
+}).catch(() => { });
 
 const app = express();
 // Trust reverse proxy headers (Vercel, Cloudflare, Nginx, etc.) to get correct client IPs
@@ -34,7 +37,8 @@ const io = new Server(server, {
 app.set('socketio', io);
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
 const allowedOrigins = [
     'https://eth-qms-ui.vercel.app',
@@ -48,12 +52,12 @@ const allowedOrigins = [
 app.use(cors({
     origin: (origin, callback) => {
         if (!origin) return callback(null, true);
-        const isAllowed = allowedOrigins.includes(origin) || 
-                          origin.startsWith('http://localhost') || 
-                          origin.startsWith('https://localhost') ||
-                          origin.startsWith('http://127.0.0.1') ||
-                          origin.endsWith('jaswanthnarne.online') ||
-                          origin.endsWith('vercel.app');
+        const isAllowed = allowedOrigins.includes(origin) ||
+            origin.startsWith('http://localhost') ||
+            origin.startsWith('https://localhost') ||
+            origin.startsWith('http://127.0.0.1') ||
+            origin.endsWith('jaswanthnarne.online') ||
+            origin.endsWith('vercel.app');
         if (isAllowed) {
             callback(null, true);
         } else {
@@ -105,7 +109,12 @@ app.get('/api/material-file/:id', serveMaterialFile);
 app.get('/api/material-file/:id/:fileName', serveMaterialFile);
 
 // Rate limiters
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { success: false, error: 'Too many login attempts, please try again after 15 minutes' } });
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 150,
+    skip: (req) => req.path === '/session-check' || req.path === '/me',
+    message: { success: false, error: 'Too many login attempts, please try again after 15 minutes' }
+});
 const examLimiter = rateLimit({
     windowMs: 1 * 60 * 1000,
     max: 600, // Permissive up to 600 requests per minute per unique candidate key
@@ -116,7 +125,7 @@ const examLimiter = rateLimit({
         const roll = req.body?.rollNumber || req.query?.rollNumber || req.body?.studentDetails?.rollNumber || '';
         const examKey = req.body?.key || req.body?.examKey || req.query?.key || '';
         const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-        
+
         if (roll || examKey) {
             return `${ip}_${examKey}_${roll}`;
         }
@@ -132,6 +141,16 @@ const ChatMessage = require('./models/ChatMessage');
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
+    // Single-session auth room registration (Max 1 login per user/student)
+    socket.on('register_auth_session', ({ userId, sessionId, role }) => {
+        if (!userId) return;
+        const roomName = `auth_session_${userId}`;
+        socket.join(roomName);
+        socket.authUserId = userId;
+        socket.authSessionId = sessionId;
+        socket.authRole = role;
+    });
+
     // Student joins an exam session
     socket.on('student_join', ({ examKey, studentName, rollNumber, mobile, studentId }) => {
         const roomId = `exam_${examKey}`;
@@ -139,7 +158,7 @@ io.on('connection', (socket) => {
         socket.examKey = examKey;
         socket.role = 'student';
         socket.userInfo = { studentName, rollNumber, mobile, studentId };
-        
+
         // Notify trainers in the room
         io.to(roomId).emit('student_status_update', {
             type: 'join',
@@ -190,12 +209,12 @@ io.on('connection', (socket) => {
             const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey });
             if (keyDoc) {
                 // Find all active keys for this exam and trainer
-                const allKeys = await TrainerExamKey.find({ 
-                    examId: keyDoc.examId, 
-                    trainerId: keyDoc.trainerId, 
-                    isActive: true 
+                const allKeys = await TrainerExamKey.find({
+                    examId: keyDoc.examId,
+                    trainerId: keyDoc.trainerId,
+                    isActive: true
                 });
-                
+
                 allKeys.forEach(k => {
                     const roomId = `exam_${k.uniqueKey}`;
                     socket.join(roomId);
@@ -222,10 +241,10 @@ io.on('connection', (socket) => {
             const keyDoc = await TrainerExamKey.findOne({ uniqueKey: examKey }).populate('examId').populate('trainerId');
             if (keyDoc) {
                 // Find all active keys for this exam and trainer
-                const allKeys = await TrainerExamKey.find({ 
-                    examId: keyDoc.examId?._id, 
-                    trainerId: keyDoc.trainerId?._id, 
-                    isActive: true 
+                const allKeys = await TrainerExamKey.find({
+                    examId: keyDoc.examId?._id,
+                    trainerId: keyDoc.trainerId?._id,
+                    isActive: true
                 });
                 const keyIds = [keyDoc._id, ...allKeys.map(k => k._id).filter(id => id.toString() !== keyDoc._id.toString())];
 
@@ -233,18 +252,18 @@ io.on('connection', (socket) => {
                     { _id: { $in: keyIds } },
                     { isStarted: true }
                 );
-                
+
                 const Notification = require('./models/Notification');
-                const trainerName = keyDoc.trainerId 
-                    ? `${keyDoc.trainerId.firstName || ''} ${keyDoc.trainerId.lastName || ''}`.trim() || keyDoc.trainerId.phone || keyDoc.trainerId.username 
+                const trainerName = keyDoc.trainerId
+                    ? `${keyDoc.trainerId.firstName || ''} ${keyDoc.trainerId.lastName || ''}`.trim() || keyDoc.trainerId.phone || keyDoc.trainerId.username
                     : 'Trainer';
-                
+
                 // Avoid duplicate start notifications for the same session
                 const existing = await Notification.findOne({
                     type: 'exam_started',
                     message: { $regex: examKey }
                 });
-                
+
                 if (!existing) {
                     const notif = await Notification.create({
                         title: 'Exam Session Started',
@@ -252,7 +271,7 @@ io.on('connection', (socket) => {
                         type: 'exam_started',
                         collegeId: keyDoc.examId?.collegeId
                     });
-                    
+
                     // Emit notification real-time to active listeners
                     io.emit('new_notification', {
                         ...notif.toObject(),
@@ -494,6 +513,10 @@ app.use('/api/question-bank', require('./routes/questionBankRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/attendance', require('./routes/attendanceRoutes'));
 app.use('/api/placement', require('./routes/placementRoutes'));
+app.use('/api/coding-arena', require('./routes/codingArenaRoutes'));
+app.use('/api/blogs', require('./routes/blogRoutes'));
+app.use('/api/language-description', require('./routes/languageDescriptionRoutes'));
+app.use('/api/algoplay', require('./routes/algoPlayRoutes'));
 
 app.get('/', (req, res) => {
     res.send('QMS API is running...');
@@ -504,7 +527,7 @@ setInterval(async () => {
     try {
         const StudentAttempt = require('./models/StudentAttempt');
         const Question = require('./models/Question');
-        
+
         // Find attempts in progress (started) where they disconnected more than 15 minutes ago
         const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
         const staleAttempts = await StudentAttempt.find({
@@ -514,37 +537,37 @@ setInterval(async () => {
 
         if (staleAttempts.length > 0) {
             console.log(`[Sweeper] Found ${staleAttempts.length} stale disconnected attempts to auto-submit.`);
-            
+
             for (const attempt of staleAttempts) {
                 if (!attempt.examId) continue;
 
-                 let questions;
-                 if (attempt.assignedQuestions && attempt.assignedQuestions.length > 0) {
-                     const unordered = await Question.find({ _id: { $in: attempt.assignedQuestions } });
-                     const parsedIds = attempt.assignedQuestions.map(id => id.toString());
-                     questions = parsedIds.map(id => unordered.find(q => q._id.toString() === id)).filter(Boolean);
-                 } else {
-                     questions = await Question.find({ examId: attempt.examId._id }).sort({ order: 1 });
-                 }
-                 let totalScore = 0;
-                 const processedQuestionIds = new Set();
-                 
-                 attempt.answers.forEach(a => {
-                     const qIdStr = a.questionId.toString();
-                     if (processedQuestionIds.has(qIdStr)) return;
-                     processedQuestionIds.add(qIdStr);
- 
-                     const question = questions.find(q => q._id.toString() === qIdStr);
-                     if (question) {
-                         if (a.isSkipped) {
-                             a.isCorrect = false;
-                             a.marksObtained = 0;
-                             return;
-                         }
-                         let isCorrect = false;
-                         const ans = a.answer;
- 
-                         if (ans !== undefined && ans !== null && ans !== '' && (!Array.isArray(ans) || ans.filter(v => v !== null && v !== undefined && v !== '').length > 0)) {
+                let questions;
+                if (attempt.assignedQuestions && attempt.assignedQuestions.length > 0) {
+                    const unordered = await Question.find({ _id: { $in: attempt.assignedQuestions } });
+                    const parsedIds = attempt.assignedQuestions.map(id => id.toString());
+                    questions = parsedIds.map(id => unordered.find(q => q._id.toString() === id)).filter(Boolean);
+                } else {
+                    questions = await Question.find({ examId: attempt.examId._id }).sort({ order: 1 });
+                }
+                let totalScore = 0;
+                const processedQuestionIds = new Set();
+
+                attempt.answers.forEach(a => {
+                    const qIdStr = a.questionId.toString();
+                    if (processedQuestionIds.has(qIdStr)) return;
+                    processedQuestionIds.add(qIdStr);
+
+                    const question = questions.find(q => q._id.toString() === qIdStr);
+                    if (question) {
+                        if (a.isSkipped) {
+                            a.isCorrect = false;
+                            a.marksObtained = 0;
+                            return;
+                        }
+                        let isCorrect = false;
+                        const ans = a.answer;
+
+                        if (ans !== undefined && ans !== null && ans !== '' && (!Array.isArray(ans) || ans.filter(v => v !== null && v !== undefined && v !== '').length > 0)) {
                             if (question.type === 'single_correct' || question.type === 'true_false' || question.type === 'mcq') {
                                 const correctChoice = question.options?.choices?.find(c => c.isCorrect);
                                 const ansStr = Array.isArray(ans) ? ans[0] : ans;
@@ -582,7 +605,7 @@ setInterval(async () => {
                 attempt.result = attempt.percentage >= (attempt.examId.passingPercentage || 40) ? 'pass' : 'fail';
                 attempt.status = 'completed';
                 attempt.completedAt = new Date();
-                
+
                 if (!attempt.violations) attempt.violations = {};
                 attempt.violations.reason = 'Auto-submitted by System Sweeper (Disconnected > 15 mins)';
 

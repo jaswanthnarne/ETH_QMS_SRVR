@@ -616,5 +616,525 @@ exports.resetStudentPassword = async (req, res) => {
     }
 };
 
+// @desc    Unified Search User across platform (Super/Ops Admin: entire project or college-scoped; Trainer: strictly batches scoped to trainer)
+// @route   GET /api/admin/search-users
+exports.searchPlatformUsers = async (req, res) => {
+    try {
+        const User = require('../models/User');
+        const College = require('../models/College');
+        const {
+            q = '',
+            type = 'all', // 'all' | 'students' | 'trainers' | 'staff'
+            collegeId: queryCollegeId = '',
+            batchId: queryBatchId = '',
+            department = '',
+            page = 1,
+            limit = 40
+        } = req.query;
+
+        const role = req.user.role;
+        const isFullGlobalAdmin = ['super_admin', 'ops_admin', 'ast_ops_admin'].includes(role);
+        const isTrainer = role === 'trainer';
+
+        // 1. Determine allowed Colleges and Batches for this user
+        let allowedCollegeIds = null; // null = unrestricted (entire project)
+        let allowedBatchIds = null;   // null = all batches within allowed colleges
+
+        if (isTrainer) {
+            const trainerBatches = await Batch.find({ trainerId: req.user._id })
+                .populate('collegeId', 'name code')
+                .populate('courseId', 'name code program')
+                .sort({ batchName: 1 })
+                .lean();
+
+            allowedBatchIds = trainerBatches.map((b) => b._id.toString());
+            const trainerCollegeSet = new Set(
+                trainerBatches.map((b) => (b.collegeId?._id || b.collegeId)?.toString()).filter(Boolean)
+            );
+            allowedCollegeIds = Array.from(trainerCollegeSet);
+        } else if (role === 'college_admin') {
+            allowedCollegeIds = req.user.collegeId ? [req.user.collegeId.toString()] : [];
+        } else if (['regional_manager', 'asst_rm', 'placement'].includes(role)) {
+            allowedCollegeIds = [
+                ...(req.user.collegeId ? [req.user.collegeId.toString()] : []),
+                ...(Array.isArray(req.user.assignedColleges) ? req.user.assignedColleges.map((c) => c.toString()) : [])
+            ];
+        }
+
+        // Apply optional collegeId filter (e.g. when inside /college/:collegeId/search-user)
+        let effectiveCollegeId = queryCollegeId && queryCollegeId !== 'all' ? queryCollegeId.toString() : '';
+        if (effectiveCollegeId && allowedCollegeIds !== null && !allowedCollegeIds.includes(effectiveCollegeId)) {
+            return res.status(403).json({
+                success: false,
+                error: 'Not authorized to search users in this college scope'
+            });
+        }
+
+        // Fetch filter metadata (batches & colleges available in current scope)
+        const batchFilterQuery = {};
+        if (isTrainer) {
+            batchFilterQuery.trainerId = req.user._id;
+        }
+        if (effectiveCollegeId) {
+            batchFilterQuery.collegeId = effectiveCollegeId;
+        } else if (allowedCollegeIds !== null) {
+            batchFilterQuery.collegeId = { $in: allowedCollegeIds };
+        }
+
+        const scopedBatches = await Batch.find(batchFilterQuery)
+            .populate('collegeId', 'name code')
+            .populate('courseId', 'name code program')
+            .populate('trainerId', 'firstName lastName employeeId phone')
+            .sort({ batchName: 1 })
+            .lean();
+
+        const collegeFilterQuery = {};
+        if (effectiveCollegeId) {
+            collegeFilterQuery._id = effectiveCollegeId;
+        } else if (allowedCollegeIds !== null) {
+            collegeFilterQuery._id = { $in: allowedCollegeIds };
+        }
+        const scopedColleges = await College.find(collegeFilterQuery)
+            .select('name code status')
+            .sort({ name: 1 })
+            .lean();
+
+        // Build search regex
+        const searchStr = q.trim();
+        const escapedSearch = searchStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = searchStr ? new RegExp(escapedSearch, 'i') : null;
+
+        // 2. Query Students
+        let studentsList = [];
+        let totalStudentsCount = 0;
+
+        const shouldFetchStudents = type === 'all' || type === 'students' || isTrainer;
+        if (shouldFetchStudents) {
+            const studentQuery = {};
+
+            if (isTrainer) {
+                if (queryBatchId && queryBatchId !== 'all') {
+                    if (!allowedBatchIds.includes(queryBatchId.toString())) {
+                        return res.status(403).json({
+                            success: false,
+                            error: 'Not authorized to search students outside your assigned batches'
+                        });
+                    }
+                    studentQuery.batchId = queryBatchId;
+                } else {
+                    studentQuery.batchId = { $in: allowedBatchIds };
+                }
+            } else {
+                if (queryBatchId && queryBatchId !== 'all') {
+                    studentQuery.batchId = queryBatchId;
+                }
+                if (effectiveCollegeId) {
+                    studentQuery.collegeId = effectiveCollegeId;
+                } else if (allowedCollegeIds !== null) {
+                    studentQuery.collegeId = { $in: allowedCollegeIds };
+                }
+            }
+
+            if (department && department !== 'all') {
+                studentQuery.department = new RegExp(`^${department.trim()}$`, 'i');
+            }
+
+            if (regex) {
+                studentQuery.$or = [
+                    { name: regex },
+                    { usn: regex },
+                    { email: regex },
+                    { mobile: regex },
+                    { department: regex }
+                ];
+            }
+
+            totalStudentsCount = await Student.countDocuments(studentQuery);
+            const rawStudents = await Student.find(studentQuery)
+                .populate({
+                    path: 'batchId',
+                    select: 'batchName department program courseId trainerId',
+                    populate: [
+                        { path: 'courseId', select: 'name code program' },
+                        { path: 'trainerId', select: 'firstName lastName phone employeeId' }
+                    ]
+                })
+                .populate('collegeId', 'name code')
+                .sort({ updatedAt: -1, name: 1 })
+                .limit(Number(limit) || 40)
+                .lean();
+
+            studentsList = rawStudents.map((s) => ({
+                _id: s._id,
+                entityType: 'student',
+                name: s.name,
+                identifier: s.usn,
+                email: s.email || '',
+                phone: s.mobile || '',
+                role: 'student',
+                roleLabel: 'Student',
+                status: s.status || 'active',
+                department: s.department || s.batchId?.department || '',
+                semester: s.semester || '',
+                division: s.division || '',
+                cgpa: s.cgpa ?? 0,
+                backlogs: s.backlogs ?? 0,
+                collegeId: s.collegeId?._id || s.collegeId || null,
+                collegeName: s.collegeId?.name || '—',
+                collegeCode: s.collegeId?.code || '',
+                batchId: s.batchId?._id || s.batchId || null,
+                batchName: s.batchId?.batchName || '—',
+                courseName: s.batchId?.courseId?.name || '',
+                courseCode: s.batchId?.courseId?.code || '',
+                program: s.batchId?.program || s.batchId?.courseId?.program || '',
+                trainerName: s.batchId?.trainerId
+                    ? `${s.batchId.trainerId.firstName || ''} ${s.batchId.trainerId.lastName || ''}`.trim()
+                    : ''
+            }));
+        }
+
+        // 3. Query Trainers & Staff (Only for Admins / Ops Admins — never for Trainers)
+        let staffList = [];
+        let totalTrainersCount = 0;
+        let totalStaffCount = 0;
+
+        if (!isTrainer) {
+            const baseUserScope = {};
+            if (effectiveCollegeId) {
+                baseUserScope.$or = [
+                    { collegeId: effectiveCollegeId },
+                    { assignedColleges: effectiveCollegeId }
+                ];
+            } else if (allowedCollegeIds !== null) {
+                baseUserScope.$or = [
+                    { collegeId: { $in: allowedCollegeIds } },
+                    { assignedColleges: { $in: allowedCollegeIds } }
+                ];
+            }
+
+            // Count trainers & staff in scope
+            totalTrainersCount = await User.countDocuments({ ...baseUserScope, role: 'trainer' });
+            if (isFullGlobalAdmin) {
+                totalStaffCount = await User.countDocuments({
+                    ...baseUserScope,
+                    role: { $in: ['super_admin', 'ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm', 'college_admin', 'placement'] }
+                });
+            }
+
+            const shouldFetchUsers = type === 'all' || type === 'trainers' || type === 'staff';
+            if (shouldFetchUsers) {
+                const userQuery = { $and: [] };
+                if (Object.keys(baseUserScope).length > 0) {
+                    userQuery.$and.push(baseUserScope);
+                }
+
+                if (type === 'trainers') {
+                    userQuery.$and.push({ role: 'trainer' });
+                } else if (type === 'staff') {
+                    userQuery.$and.push({
+                        role: { $in: ['super_admin', 'ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm', 'college_admin', 'placement'] }
+                    });
+                } else {
+                    userQuery.$and.push({
+                        role: isFullGlobalAdmin
+                            ? { $in: ['trainer', 'super_admin', 'ops_admin', 'ast_ops_admin', 'regional_manager', 'asst_rm', 'college_admin', 'placement'] }
+                            : 'trainer'
+                    });
+                }
+
+                if (regex) {
+                    userQuery.$and.push({
+                        $or: [
+                            { firstName: regex },
+                            { lastName: regex },
+                            { email: regex },
+                            { phone: regex },
+                            { employeeId: regex },
+                            { username: regex }
+                        ]
+                    });
+                }
+
+                const finalUserFilter = userQuery.$and.length > 0 ? userQuery : {};
+                const rawUsers = await User.find(finalUserFilter)
+                    .populate('collegeId', 'name code')
+                    .populate('assignedColleges', 'name code')
+                    .populate('assignedCourses', 'name code program')
+                    .sort({ role: 1, firstName: 1 })
+                    .limit(25)
+                    .lean();
+
+                const ROLE_LABELS = {
+                    super_admin: 'Super Admin',
+                    ops_admin: 'Ops Admin',
+                    ast_ops_admin: 'Asst Ops Admin',
+                    regional_manager: 'Regional Manager',
+                    asst_rm: 'Asst Regional Manager',
+                    college_admin: 'College Admin',
+                    placement: 'Placement Officer',
+                    trainer: 'Trainer'
+                };
+
+                const scopedCollegeObj = effectiveCollegeId
+                    ? scopedColleges.find((c) => c._id.toString() === effectiveCollegeId.toString())
+                    : null;
+
+                staffList = rawUsers.map((u) => {
+                    const fullName = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.username || u.email || 'User';
+                    const primaryCollege = u.collegeId;
+                    const extraColleges = Array.isArray(u.assignedColleges) ? u.assignedColleges : [];
+                    const allCollegesMap = new Map();
+                    if (primaryCollege?._id) allCollegesMap.set(primaryCollege._id.toString(), primaryCollege);
+                    extraColleges.forEach((c) => {
+                        if (c?._id) allCollegesMap.set(c._id.toString(), c);
+                    });
+                    const mappedColleges = Array.from(allCollegesMap.values());
+
+                    const displayCollege = scopedCollegeObj
+                        ? scopedCollegeObj
+                        : primaryCollege || mappedColleges[0] || null;
+
+                    return {
+                        _id: u._id,
+                        entityType: u.role === 'trainer' ? 'trainer' : 'staff',
+                        name: fullName,
+                        identifier: u.employeeId || u.email || u.phone || u.username || '—',
+                        email: u.email || '',
+                        phone: u.phone || '',
+                        employeeId: u.employeeId || '',
+                        role: u.role,
+                        roleLabel: ROLE_LABELS[u.role] || u.role,
+                        status: u.isActive !== false ? 'active' : 'inactive',
+                        program: u.program || '',
+                        collegeId: displayCollege?._id || null,
+                        collegeName: scopedCollegeObj
+                            ? scopedCollegeObj.name
+                            : (primaryCollege?.name || mappedColleges.map((c) => c.name).join(', ') || 'All Colleges'),
+                        collegeCode: displayCollege?.code || '',
+                        assignedColleges: mappedColleges.map((c) => ({ _id: c._id, name: c.name, code: c.code })),
+                        assignedCourses: (u.assignedCourses || []).map((c) => ({
+                            _id: c._id,
+                            name: c.name,
+                            code: c.code,
+                            program: c.program
+                        })),
+                        lastLogin: u.lastLogin || null
+                    };
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            scope: {
+                mode: isTrainer ? 'trainer_batches' : (effectiveCollegeId ? 'college_scoped' : 'entire_project'),
+                role,
+                effectiveCollegeId: effectiveCollegeId || null,
+                batchesCount: scopedBatches.length,
+                collegesCount: scopedColleges.length
+            },
+            counts: {
+                students: totalStudentsCount,
+                trainers: totalTrainersCount,
+                staff: totalStaffCount
+            },
+            filters: {
+                colleges: scopedColleges,
+                batches: scopedBatches.map((b) => ({
+                    _id: b._id,
+                    batchName: b.batchName,
+                    department: b.department,
+                    collegeId: b.collegeId?._id || b.collegeId,
+                    collegeName: b.collegeId?.name || '',
+                    collegeCode: b.collegeId?.code || '',
+                    courseName: b.courseId?.name || '',
+                    courseCode: b.courseId?.code || ''
+                }))
+            },
+            data: {
+                students: studentsList,
+                users: staffList
+            }
+        });
+    } catch (error) {
+        console.error('searchPlatformUsers error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// @desc    Get 360-degree user profile (Student or Trainer/Staff) respecting caller's role scope
+// @route   GET /api/admin/search-users/:entityType/:id
+exports.getUser360Profile = async (req, res) => {
+    try {
+        const { entityType, id } = req.params;
+        const User = require('../models/User');
+        const StudentAttempt = require('../models/StudentAttempt');
+        const AttendanceSession = require('../models/AttendanceSession');
+        const TrainingLog = require('../models/TrainingLog');
+
+        const role = req.user.role;
+        const isTrainer = role === 'trainer';
+
+        if (entityType === 'student') {
+            const student = await Student.findById(id)
+                .populate({
+                    path: 'batchId',
+                    select: 'batchName department program startDate endDate courseId trainerId',
+                    populate: [
+                        { path: 'courseId', select: 'name code program modulesCount' },
+                        { path: 'trainerId', select: 'firstName lastName phone email employeeId' }
+                    ]
+                })
+                .populate('collegeId', 'name code contactEmail contactPhone')
+                .lean();
+
+            if (!student) {
+                return res.status(404).json({ success: false, error: 'Student not found' });
+            }
+
+            // Enforce Trainer batch scoping
+            if (isTrainer) {
+                const trainerBatch = await Batch.findOne({
+                    _id: student.batchId?._id || student.batchId,
+                    trainerId: req.user._id
+                }).lean();
+                if (!trainerBatch) {
+                    return res.status(403).json({
+                        success: false,
+                        error: 'Not authorized to view a student outside your assigned batches'
+                    });
+                }
+            }
+
+            // Fetch exam attempts for this student's USN
+            const usnRegex = new RegExp(`^${(student.usn || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+            const attempts = await StudentAttempt.find({
+                'studentDetails.rollNumber': usnRegex
+            })
+                .populate('examId', 'title totalMarks passingPercentage duration courseId')
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .lean();
+
+            // Fetch attendance stats for this student
+            const attendanceSessions = await AttendanceSession.find({
+                batchId: student.batchId?._id || student.batchId,
+                'records.studentId': student._id
+            })
+                .select('date topic period module records')
+                .sort({ date: -1 })
+                .limit(30)
+                .lean();
+
+            let presentCount = 0;
+            let absentCount = 0;
+            const recentAttendance = attendanceSessions.map((sess) => {
+                const rec = (sess.records || []).find((r) => r.studentId?.toString() === student._id.toString());
+                const st = rec?.status || 'absent';
+                if (st === 'present' || st === 'late') presentCount++;
+                else absentCount++;
+                return {
+                    _id: sess._id,
+                    date: sess.date,
+                    topic: sess.topic,
+                    period: sess.period,
+                    module: sess.module,
+                    status: st
+                };
+            });
+
+            const totalMarked = presentCount + absentCount;
+            const attendancePercentage = totalMarked > 0 ? Math.round((presentCount / totalMarked) * 100) : 0;
+
+            const completedAttempts = attempts.filter((a) => a.status === 'completed');
+            const avgScore =
+                completedAttempts.length > 0
+                    ? Number(
+                          (
+                              completedAttempts.reduce((acc, a) => acc + (a.percentage || 0), 0) /
+                              completedAttempts.length
+                          ).toFixed(1)
+                      )
+                    : 0;
+            const passedCount = completedAttempts.filter((a) => a.result === 'pass').length;
+
+            return res.json({
+                success: true,
+                data: {
+                    entityType: 'student',
+                    profile: student,
+                    examSummary: {
+                        totalAttempts: attempts.length,
+                        completedAttempts: completedAttempts.length,
+                        passedCount,
+                        avgScore
+                    },
+                    attempts: attempts.map((a) => ({
+                        _id: a._id,
+                        examTitle: a.examId?.title || 'Assessment',
+                        totalScore: a.totalScore,
+                        totalMarks: a.examId?.totalMarks || 0,
+                        percentage: Number((a.percentage || 0).toFixed(1)),
+                        result: a.result,
+                        status: a.status,
+                        completedAt: a.completedAt || a.startedAt,
+                        violationsCount:
+                            (a.violations?.tabSwitches || 0) +
+                            (a.violations?.fullScreenExits || 0) +
+                            (a.violations?.copyAttempts || 0) +
+                            (a.violations?.windowBlurs || 0)
+                    })),
+                    attendanceSummary: {
+                        totalSessions: totalMarked,
+                        presentCount,
+                        absentCount,
+                        percentage: attendancePercentage,
+                        recentSessions: recentAttendance.slice(0, 8)
+                    }
+                }
+            });
+        }
+
+        // Trainer or Staff profile (Admins only)
+        if (isTrainer) {
+            return res.status(403).json({
+                success: false,
+                error: 'Trainers can only inspect students in their assigned batches'
+            });
+        }
+
+        const userDoc = await User.findById(id)
+            .populate('collegeId', 'name code contactEmail')
+            .populate('assignedColleges', 'name code')
+            .populate('assignedCourses', 'name code program')
+            .lean();
+
+        if (!userDoc) {
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
+
+        const userBatches = await Batch.find({ trainerId: userDoc._id })
+            .populate('collegeId', 'name code')
+            .populate('courseId', 'name code program')
+            .sort({ createdAt: -1 })
+            .lean();
+
+        const logsCount = await TrainingLog.countDocuments({ trainerId: userDoc._id });
+
+        return res.json({
+            success: true,
+            data: {
+                entityType: userDoc.role === 'trainer' ? 'trainer' : 'staff',
+                profile: userDoc,
+                batches: userBatches,
+                trainingLogsCount: logsCount
+            }
+        });
+    } catch (error) {
+        console.error('getUser360Profile error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 
 
